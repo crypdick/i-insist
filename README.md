@@ -143,7 +143,8 @@ Checker input:
   "paths": ["/repo/_sources/original.txt"],
   "harness": "claude",
   "tool_name": "Write",
-  "tool_input": {"file_path": "_sources/original.txt", "content": "replacement"}
+  "tool_input": {"file_path": "_sources/original.txt", "content": "replacement"},
+  "changes": [{"path": "/repo/_sources/original.txt", "operation": "write", "content": "replacement"}]
 }
 ```
 
@@ -156,12 +157,28 @@ Checker input:
 | `harness` | Adapter identity, such as `codex` or `claude` |
 | `tool_name` | Original tool name |
 | `tool_input` | Original tool arguments, unchanged, including unknown fields |
+| `changes` | File changes: absolute `path`, `operation` (`write`, `edit`, or `delete`), and text `content` |
 
 Adapters recognize shell calls and common direct editing tools, including
 `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, and `apply_patch`. Patch targets
 include additions, updates, deletions, and both sides of renames. Unknown tools
 still reach every applicable checker as `other`; custom policies can inspect
 their original names and arguments.
+
+Since 0.3.0, content checkers can use `changes` without parsing tool arguments.
+Writes contain the supplied body; edits contain replacement text; MultiEdit
+joins replacement strings with newlines; notebook edits contain the supplied
+cell source. Patches contain added lines for each target. A rename produces a
+source deletion and destination write. Deletions have empty content. Shell and
+unknown tools have no inferred file changes.
+
+`content` is the supplied text, not a reconstruction of the resulting file.
+Checks that need existing content must read the file themselves. Patch fragments
+may not contain complete frontmatter or other surrounding syntax.
+
+Custom harnesses can pass `changes` to `i-insist check`; their paths participate
+in rule discovery even when omitted from `paths`. Existing callers can omit
+`changes`, but checkers requiring file content may reject those events.
 
 Providers own their TOML, checker programs, and dependencies. Installers should
 update only their own files, preserve user changes such as `enabled = false`,
