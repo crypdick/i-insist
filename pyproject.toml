@@ -26,6 +26,7 @@ packages = ["src/i_insist"]
 [tool.hatch.build.targets.sdist]
 exclude = [
     ".new-feature/**",
+    ".new-feature.local.toml",
     ".worktrees/**",
     ".DS_Store?",
     ".Spotlight-V100",

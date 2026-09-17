@@ -1,0 +1,5 @@
+target_branch = "main"
+setup = ["uv sync --locked --all-groups"]
+pre_merge = ["uv run prek run --all-files", "uv build"]
+post_merge = ["uv run prek run --all-files", "uv build"]
+teardown = []
