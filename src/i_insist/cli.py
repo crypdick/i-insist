@@ -70,7 +70,10 @@ def run_hook(data: dict[str, Json], harness: str, event_name: str) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run agent tool guards and human overrides.")
+    parser = argparse.ArgumentParser(
+        description="Run agent tool guards and human overrides.",
+        epilog="Documentation: https://github.com/crypdick/i-insist#readme",
+    )
     commands = parser.add_subparsers(dest="command", required=True)
     hook = commands.add_parser("hook", help="Handle a public harness hook payload on stdin")
     hook.add_argument("--harness", choices=("codex", "claude"), required=True)
