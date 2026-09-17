@@ -295,12 +295,8 @@ run through prek and uv. Install hooks once per checkout with
 Create an isolated checkout with one command:
 
 ```sh
-new-feature <name> --no-agent
+new-feature <name> --no-agent && uv sync --locked --directory ".worktrees/<name>"
 ```
-
-Repository configuration syncs locked development dependencies during creation and runs the CI
-quality gates before and after merge. Keep personal agent, pull, and push preferences in the
-ignored `.new-feature.local.toml` sidecar.
 
 ```sh
 uv sync --locked
