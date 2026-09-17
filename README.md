@@ -168,7 +168,38 @@ update only their own files, preserve user changes such as `enabled = false`,
 and remove their registrations on uninstall. Existing plugin-specific policy
 configuration can stay where it is; the provider's checker reads it.
 
+## Protecting configuration
+
+`i-insist install` installs `~/.i-insist/i-insist.toml`. Its checker blocks
+explicit file edits under `.i-insist` and common shell mutations that name those
+directories. Human approval is required for changes, including disabling this
+rule. The same rule ships in [examples/config-protection.toml](examples/config-protection.toml).
+Existing configuration is preserved on repeated installation.
+
+The shell check recognizes common file commands, redirections, in-place `sed`,
+and interpreter commands naming `.i-insist`. Opaque scripts, dynamically
+constructed paths, and commands that change directories internally can evade
+it. This remains a cooperative guard, not a filesystem sandbox.
+
+## Provider dependency setup
+
+Providers can install a missing runner with `uv tool install` and then call
+`i-insist ensure`. It registers all three hooks for Codex/Claude installations
+found on `PATH` or through existing user configuration. Explicit disabled hooks
+cause a nonzero exit. It checks user settings, Codex per-hook disable state, and
+conservatively rejects disable flags in the current directory's ancestry.
+
+Registration is not proof of live execution: Codex hook trust, managed policy,
+command-line overrides, and a running session's snapshot remain harness-owned.
+Restart and review `/hooks` after installation. `ensure` never creates trust
+records or clears explicit disable settings. Providers must stop migration when
+it fails and keep existing guards until setup succeeds.
+
 ## Human overrides
+
+Rules may set `overridable = false` (default: `true`). These rules still run
+after human approval, including shell environment overrides. `enabled = false`
+still disables a rule. Invalid configuration still blocks approved calls.
 
 Send `I insist` on its own line, optionally followed by `.` or `!`, for example:
 

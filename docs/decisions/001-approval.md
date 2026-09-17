@@ -21,3 +21,6 @@ operation-specific permission becomes a requirement, replace this mechanism with
 a harness-supported approval flow; do not disguise this boolean as such a flow.
 
 Exact syntax and runtime behavior are canonical in [README](../../README.md#human-overrides).
+
+Provider migration preserves policies that explicitly forbid overrides. Such
+rules set `overridable = false`; approval skips only overridable rules.

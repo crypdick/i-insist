@@ -5,8 +5,11 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import shutil
 import stat
 import tempfile
+import tomllib
+from importlib.resources import files
 from pathlib import Path
 
 from i_insist.events import GuardError
@@ -111,6 +114,9 @@ def configure(harness: str, *, install: bool) -> Path:
             document = json.loads(original) if original is not None else {}
             if not isinstance(document, dict):
                 raise ValueError("root must be an object")
+            if install:
+                check_enabled(document, harness, path)
+                install_config_protection()
             if not edit_hooks(document, harness, install):
                 return path
             updated = json.dumps(document, indent=2) + "\n"
@@ -141,3 +147,98 @@ def configure(harness: str, *, install: bool) -> Path:
         except (OSError, ValueError) as exc:
             raise GuardError(f"configuration {path}: {exc}") from exc
     return path
+
+
+def install_config_protection() -> None:
+    destination = Path.home() / ".i-insist" / "i-insist.toml"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    # Existing user edits, including enabled = false, remain authoritative.
+    source = files("i_insist").joinpath("config-protection.toml").read_text()
+    try:
+        with destination.open("x") as stream:
+            stream.write(source)
+    except FileExistsError:
+        pass
+
+
+def check_enabled(document: dict, harness: str, path: Path) -> None:
+    """Reject explicit disables; trust decisions remain owned by the harness."""
+    check_project_settings(harness)
+    if harness == "claude":
+        if document.get("disableAllHooks") is True or document.get("allowManagedHooksOnly") is True:
+            raise GuardError(
+                "Claude hooks are disabled or managed-only; review /hooks and settings"
+            )
+        return
+    root = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))).expanduser()
+    config_path = root / "config.toml"
+    config = tomllib.loads(config_path.read_text()) if config_path.exists() else {}
+    features = config.get("features", {})
+    if features.get("hooks", features.get("codex_hooks", True)) is False:
+        raise GuardError("Codex hooks are disabled in config.toml; enable hooks before migration")
+    hooks = config.get("hooks", {})
+    if hooks.get("allow_managed_hooks_only") is True:
+        raise GuardError("Codex unmanaged hooks are disabled")
+    states = hooks.get("state", {})
+    registered = document.get("hooks", {})
+    if not isinstance(registered, dict):
+        raise GuardError("hooks must be an object")
+    for event, groups in registered.items():
+        if event not in EVENTS or not isinstance(groups, list):
+            continue
+        snake = {
+            "PreToolUse": "pre_tool_use",
+            "SessionStart": "session_start",
+            "UserPromptSubmit": "user_prompt_submit",
+        }[event]
+        for group_index, group in enumerate(groups):
+            if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
+                continue
+            for handler_index, handler in enumerate(group["hooks"]):
+                if not owned(handler, harness, EVENTS[event]):
+                    continue
+                keys = [
+                    f"{source}:{snake}:{group_index}:{handler_index}"
+                    for source in {path, root / "hooks.json"}
+                ]
+                if any(states.get(key, {}).get("enabled") is False for key in keys):
+                    raise GuardError("An i-insist hook is disabled in Codex; enable it with /hooks")
+
+
+def check_project_settings(harness: str) -> None:
+    # NOTE: README describes this conservative check of current ancestry.
+    for parent in (*Path.cwd().parents, Path.cwd()):
+        names = (
+            (".codex/config.toml",)
+            if harness == "codex"
+            else (".claude/settings.json", ".claude/settings.local.json")
+        )
+        for name in names:
+            path = parent / name
+            if not path.exists():
+                continue
+            data = (
+                tomllib.loads(path.read_text())
+                if harness == "codex"
+                else json.loads(path.read_text())
+            )
+            if not isinstance(data, dict):
+                raise GuardError(f"configuration must be an object: {path}")
+            features = data.get("features", {})
+            disabled = (
+                features.get("hooks", features.get("codex_hooks", True)) is False
+                if harness == "codex"
+                else data.get("disableAllHooks") is True
+                or data.get("allowManagedHooksOnly") is True
+            )
+            if disabled:
+                raise GuardError(f"Hooks are disabled by {path}; enable them before migration")
+
+
+def ensure() -> list[Path]:
+    harnesses = [
+        harness
+        for harness in ("codex", "claude")
+        if shutil.which(harness) or configuration_path(harness).exists()
+    ]
+    return [configure(harness, install=True) for harness in harnesses]

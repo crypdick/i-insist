@@ -221,6 +221,35 @@ def test_prompt_approval_allows_multiple_edits_then_resets(workspace: Path):
     assert denial(invoke(workspace, payload)) == "Blocked by guard"
 
 
+@pytest.mark.parametrize("harness", ["codex", "claude"])
+@pytest.mark.parametrize("approval", ["prompt", "shell"])
+def test_non_overridable_rules_still_run(workspace: Path, harness: str, approval: str):
+    rule(workspace, "raise RuntimeError('approved rule must not run')", name="a-ordinary")
+    rule(workspace, "print('true')", name="protected", extra="overridable = false\n")
+    payload = tool(
+        workspace, command="HUMAN_PERMISSION_GRANTED=1 true" if approval == "shell" else "true"
+    )
+    if approval == "prompt":
+        allowed(
+            invoke(
+                workspace, {**payload, "prompt": "I insist"}, "user-prompt-submit", harness=harness
+            )
+        )
+    assert denial(invoke(workspace, payload, harness=harness)) == "Blocked by protected"
+
+
+def test_disabled_non_overridable_rule_does_not_run(workspace: Path):
+    rule(
+        workspace, "raise RuntimeError('disabled')", extra="enabled = false\noverridable = false\n"
+    )
+    allowed(invoke(workspace, tool(workspace)))
+
+
+def test_overridable_requires_boolean(workspace: Path):
+    rule(workspace, "print('false')", extra="overridable = 'false'\n")
+    assert "overridable must be a boolean" in denial(invoke(workspace, tool(workspace)))
+
+
 @pytest.mark.parametrize(
     "prompt",
     [
@@ -533,3 +562,109 @@ def test_uninstall_without_owned_hooks_does_not_rewrite_settings(workspace: Path
     path.write_text(contents)
     assert manage_hooks("uninstall", "codex", workspace).returncode == 0
     assert path.read_text() == contents
+
+
+@pytest.mark.parametrize(
+    "name,arguments",
+    [
+        ("Write", {"file_path": ".i-insist/policy.toml"}),
+        (
+            "apply_patch",
+            {"patch": "*** Begin Patch\n*** Delete File: .i-insist/policy.toml\n*** End Patch"},
+        ),
+        ("Bash", {"command": "rm -rf .i-insist"}),
+        ("Bash", {"command": 'printf "enabled = false" > ~/.i-insist/policy.toml'}),
+    ],
+)
+def test_config_protection_requires_human_approval(workspace: Path, name, arguments):
+    installed = subprocess.run(
+        [sys.executable, "-m", "i_insist", "install", "codex"], capture_output=True, text=True
+    )
+    assert installed.returncode == 0, installed.stderr
+    payload = tool(workspace, name, **arguments)
+    assert "human approval" in denial(invoke(workspace, payload))
+    allowed(invoke(workspace, {**payload, "prompt": "I insist"}, "user-prompt-submit"))
+    allowed(invoke(workspace, payload))
+
+
+@pytest.mark.parametrize(
+    "command", ["cat .i-insist/policy.toml", "rg enabled ~/.i-insist", "git status"]
+)
+def test_config_protection_allows_reads(workspace: Path, command: str):
+    installed = subprocess.run(
+        [sys.executable, "-m", "i_insist", "install", "codex"], capture_output=True, text=True
+    )
+    assert installed.returncode == 0, installed.stderr
+    allowed(invoke(workspace, tool(workspace, command=command)))
+
+
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+def test_install_refuses_explicitly_disabled_hooks(workspace: Path, harness: str):
+    directory = Path.home() / (".codex" if harness == "codex" else ".claude")
+    directory.mkdir()
+    path = directory / ("config.toml" if harness == "codex" else "settings.json")
+    original = "[features]\nhooks = false\n" if harness == "codex" else '{"disableAllHooks": true}'
+    path.write_text(original)
+    result = subprocess.run(
+        [sys.executable, "-m", "i_insist", "install", harness], capture_output=True, text=True
+    )
+    assert result.returncode == 2
+    assert "disabled" in result.stderr
+    assert path.read_text() == original
+
+
+def test_ensure_refuses_disabled_individual_codex_hook(workspace: Path):
+    assert manage_hooks("install", "codex", workspace).returncode == 0
+    root = Path.home() / ".codex"
+    (root / "config.toml").write_text(
+        f'[hooks.state."{root}/hooks.json:pre_tool_use:0:0"]\nenabled = false\n'
+    )
+    result = subprocess.run(
+        [sys.executable, "-m", "i_insist", "ensure"], cwd=workspace, capture_output=True, text=True
+    )
+    assert result.returncode == 2
+    assert "disabled" in result.stderr
+
+
+@pytest.mark.parametrize("harness", ["codex", "claude"])
+def test_ensure_refuses_disabled_project_hooks(workspace: Path, harness: str):
+    assert manage_hooks("install", harness, workspace).returncode == 0
+    directory = workspace / (".codex" if harness == "codex" else ".claude")
+    directory.mkdir()
+    path = directory / ("config.toml" if harness == "codex" else "settings.local.json")
+    path.write_text(
+        "[features]\nhooks = false\n" if harness == "codex" else '{"disableAllHooks": true}'
+    )
+    result = subprocess.run(
+        [sys.executable, "-m", "i_insist", "ensure"], cwd=workspace, capture_output=True, text=True
+    )
+    assert result.returncode == 2
+    assert "disabled" in result.stderr
+
+
+def test_config_protection_example_matches_installed_rule(workspace: Path):
+    assert manage_hooks("install", "codex", workspace).returncode == 0
+    expected = Path(__file__).resolve().parents[1] / "examples/config-protection.toml"
+    assert (Path.home() / ".i-insist/i-insist.toml").read_text() == expected.read_text()
+
+
+def test_neutral_check_keeps_non_overridable_rules(workspace: Path):
+    rule(workspace, "print('true')", extra="overridable = false\n")
+    event = {
+        "kind": "shell",
+        "command": "HUMAN_PERMISSION_GRANTED=1 true",
+        "cwd": str(workspace),
+        "paths": [],
+        "harness": "custom",
+        "tool_name": "exec",
+        "tool_input": {},
+    }
+    result = subprocess.run(
+        [sys.executable, "-m", "i_insist", "check"],
+        input=json.dumps(event),
+        cwd=workspace,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"blocked": True, "message": "Blocked by guard"}

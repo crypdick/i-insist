@@ -22,6 +22,7 @@ class Rule:
     directory: Path
     enabled: bool
     timeout: float
+    overridable: bool
 
 
 def config_files(event: Event) -> list[Path]:
@@ -60,7 +61,7 @@ def load_rules(path: Path) -> list[Rule]:
         for entry in entries:
             if not isinstance(entry, dict):
                 raise ValueError("each rule must be a table")
-            if entry.keys() - {"id", "checker", "message", "enabled", "timeout"}:
+            if entry.keys() - {"id", "checker", "message", "enabled", "timeout", "overridable"}:
                 raise ValueError("unknown rule fields")
             name, checker, message = (entry.get(key) for key in ("id", "checker", "message"))
             if not isinstance(name, str) or not name.strip() or name in ids:
@@ -79,10 +80,17 @@ def load_rules(path: Path) -> list[Rule]:
             enabled = entry.get("enabled", True)
             if not isinstance(enabled, bool):
                 raise ValueError(f"{name}: enabled must be a boolean")
+            overridable = entry.get("overridable", True)
+            if not isinstance(overridable, bool):
+                raise ValueError(f"{name}: overridable must be a boolean")
             timeout = entry.get("timeout", 10)
             if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
                 raise ValueError(f"{name}: timeout must be a positive finite number")
-            result.append(Rule(name, tuple(checker), message, path.parent, enabled, float(timeout)))
+            result.append(
+                Rule(
+                    name, tuple(checker), message, path.parent, enabled, float(timeout), overridable
+                )
+            )
             ids.add(name)
         return result
     except (OSError, ValueError) as exc:
@@ -128,12 +136,12 @@ def run_checker(rule: Rule, event: Event) -> bool:
     return result
 
 
-def check(event: Event) -> str | None:
+def check(event: Event, *, approved: bool = False) -> str | None:
     try:
         rules = [rule for path in config_files(event) for rule in load_rules(path)]
     except OSError as exc:
         raise GuardError(f"configuration discovery: {exc}") from exc
     for rule in rules:
-        if rule.enabled and run_checker(rule, event):
+        if rule.enabled and not (approved and rule.overridable) and run_checker(rule, event):
             return rule.message
     return None
