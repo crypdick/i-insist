@@ -279,3 +279,29 @@ uv build
 Tests exercise installed hook commands and actual checker subprocesses using
 temporary homes, projects, and approval caches. They do not enable hooks in your
 active harness.
+
+## Publishing
+
+`.github/workflows/publish.yml` runs tests, lint, formatting, and a package build
+on pull requests. Each successful push to `main` publishes a release to PyPI
+and creates a GitHub release with the wheel and source distribution attached.
+Manual workflow dispatch retries a release without needing another commit.
+
+The workflow preserves an unpublished version from `pyproject.toml`; otherwise,
+it increments the latest stable PyPI patch version. Use `uv version --bump minor`
+or `uv version --bump major` for an intentional version change. The release
+commit updates `pyproject.toml` and `uv.lock` together. Superseded runs are
+skipped, and retries reuse their release commit and already uploaded files.
+
+Publishing uses [PyPI Trusted Publishing](https://docs.pypi.org/trusted-publishers/)
+and the GitHub environment `pypi`, restricted to `main`. No PyPI API token is
+stored in GitHub. To configure a first publication, add a pending publisher at
+[PyPI account publishing](https://pypi.org/manage/account/publishing/) with:
+
+- Project: `i-insist`
+- GitHub owner: `crypdick`
+- Repository: `i-insist`
+- Workflow filename: `publish.yml`
+- Environment: `pypi`
+
+After the first release, install from PyPI with `uv tool install i-insist`.
