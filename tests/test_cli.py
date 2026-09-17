@@ -178,6 +178,8 @@ def test_overridable_requires_boolean(workspace: Path):
 @pytest.mark.parametrize(
     "prompt",
     [
+        "ok i insist",
+        "Please proceed, I INSIST, and finish the update.",
         "Explain 'I insist'",
         "Do not use I insist.",
         "```\nI insist\n```",
@@ -185,11 +187,12 @@ def test_overridable_requires_boolean(workspace: Path):
         "I insist on naming it well.",
     ],
 )
-def test_mentions_and_quoted_phrases_are_not_approval(workspace: Path, prompt: str):
+@pytest.mark.parametrize("harness", ["codex", "claude"])
+def test_phrase_anywhere_in_human_prompt_grants_approval(workspace: Path, prompt: str, harness: str):
     rule(workspace, "print('true')")
     payload = tool(workspace, "Write", file_path="a.txt")
-    allowed(invoke(workspace, {**payload, "prompt": prompt}, "user-prompt-submit"))
-    assert denial(invoke(workspace, payload)) == "Blocked by guard"
+    allowed(invoke(workspace, {**payload, "prompt": prompt}, "user-prompt-submit", harness=harness))
+    allowed(invoke(workspace, payload, harness=harness))
 
 
 def test_approval_does_not_cross_sessions_turns_or_harnesses(workspace: Path):

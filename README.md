@@ -220,15 +220,13 @@ Rules may set `overridable = false` (default: `true`). These rules still run
 after human approval, including shell environment overrides. `enabled = false`
 still disables a rule. Invalid configuration still blocks approved calls.
 
-Send `I insist` on its own line, optionally followed by `.` or `!`, for example:
+Include `i insist` anywhere in your message, in any capitalization:
 
 ```text
-I insist.
-Update both protected files.
+ok i insist, update both protected files
 ```
 
-Matching ignores case. Quoted lines, fenced code, and indented code examples do
-not grant approval. A phrase embedded in another sentence does not match.
+Matching is a case-insensitive substring check, including quoted text and code blocks.
 
 `UserPromptSubmit` records approval for the current response. Subsequent tool
 calls in that response bypass these rules, including direct file edits and custom
