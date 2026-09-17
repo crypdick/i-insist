@@ -35,10 +35,12 @@ def run_hook(data: dict[str, Json], harness: str, event_name: str) -> None:
         prompt = data.get("prompt")
         if not isinstance(prompt, str):
             raise GuardError("input prompt must be a string")
-        assert approvals is not None
+        if approvals is None:
+            raise GuardError("approval context is required for prompts")
         approvals.record(prompt_approves(prompt), turn)
     elif event_name == "session-start":
-        assert approvals is not None
+        if approvals is None:
+            raise GuardError("approval context is required for session start")
         if data.get("source") != "compact":
             approvals.reset()
         print(
@@ -82,14 +84,12 @@ def main() -> int:
     commands.add_parser("ensure", help="Install and verify hooks for available harnesses")
     commands.add_parser("check", help="Check a normalized event from any harness on stdin")
     for action in ("install", "uninstall"):
-        registration = commands.add_parser(
-            action, help=f"{action.title()} user-level harness hooks"
-        )
+        registration = commands.add_parser(action, help=f"{action.title()} user-level harness hooks")
         registration.add_argument("harness", choices=("codex", "claude"))
     args = parser.parse_args()
     try:
         if args.command in {"install", "uninstall"}:
-            from i_insist.install import configure
+            from i_insist.install import configure  # noqa: PLC0415
 
             path = configure(args.harness, install=args.command == "install")
             print(f"{args.command.title()}ed {args.harness} hooks: {path}")
@@ -97,7 +97,7 @@ def main() -> int:
                 print("Restart the harness and review hook trust with /hooks.")
             return 0
         if args.command == "ensure":
-            from i_insist.install import ensure
+            from i_insist.install import ensure  # noqa: PLC0415
 
             for path in ensure():
                 print(f"Registered and checked hooks: {path}")
@@ -105,7 +105,7 @@ def main() -> int:
             return 0
         data = object_input(json.load(sys.stdin, parse_constant=reject_constant))
         if args.command == "protect-config":
-            from i_insist.protect_config import should_block
+            from i_insist.protect_config import should_block  # noqa: PLC0415
 
             print(json.dumps(should_block(Event.from_json(data))))
         elif args.command == "hook":

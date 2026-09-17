@@ -9,7 +9,9 @@ description = "Agent tool guards with provider-owned rules and human overrides."
 readme = "README.md"
 requires-python = ">=3.12"
 authors = [{ name = "Ricardo Decal" }]
-dependencies = []
+dependencies = [
+    "beartype>=0.22.9",
+]
 
 [project.urls]
 Repository = "https://github.com/crypdick/i-insist"
@@ -21,16 +23,117 @@ i-insist = "i_insist.cli:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/i_insist"]
 
+[tool.hatch.build.targets.sdist]
+exclude = [
+    ".new-feature/**",
+    ".worktrees/**",
+    ".DS_Store?",
+    ".Spotlight-V100",
+    ".Trashes",
+    "._thing",
+    "Thumbs.db",
+    "editor.swp",
+    "editor~",
+    "ehthumbs.db",
+]
+
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.12"]
+dev = [
+    "check-sdist>=1.6.0",
+    "deptry>=0.25.1",
+    "detect-secrets>=1.5.0",
+    "flynt>=1.0.6",
+    "mypy>=2.3.1",
+    "prek>=0.5.3",
+    "pytest>=8",
+    "pytest-cov>=7.1.0",
+    "pytest-timeout>=2.4.0",
+    "pytest-xdist>=3.8.0",
+    "pyupgrade>=3.21.2",
+    "ruff>=0.12",
+    "validate-pyproject>=0.26",
+    "vulture>=2.16",
+]
 
 [tool.ruff]
 target-version = "py312"
-line-length = 100
+line-length = 110
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP"]
+preview = true
+explicit-preview-rules = true
+select = [
+    "A", "ANN001", "ANN002", "ANN003", "ANN201", "ANN202", "ANN204", "ANN205",
+    "ANN206", "ANN401", "ARG", "ASYNC", "B", "BLE", "C4", "COM818", "C90",
+    "D402", "D414", "D418", "D419", "DOC102", "DOC202", "DOC403", "DTZ", "E",
+    "ERA", "EXE", "F", "FA", "FBT", "FURB101", "FURB103", "FURB122", "FURB129",
+    "FURB132", "FURB157", "FURB161", "FURB162", "FURB168", "FURB169", "FURB171",
+    "FURB177", "FURB181", "FURB188", "G", "I", "INP", "ISC004", "LOG", "N",
+    "PERF", "PGH", "PIE", "PLC", "PLE", "PLR0124", "PLR0133", "PLR0206",
+    "PLR0911", "PLR0912", "PLR0913", "PLR0915", "PLR1702", "PLR1704", "PLR1711",
+    "PLR1714", "PLR1716", "PLR1722", "PLR1733", "PLR1736", "PLR5501", "PLW", "PT",
+    "PTH", "RET", "RSE", "RUF", "S", "SIM", "SLF", "SLOT", "T10", "T20", "TC",
+    "TID", "TRY004", "TRY201", "TRY203", "TRY300", "TRY400", "TRY401", "UP", "W",
+    "YTT",
+]
+ignore = ["E501", "TRY003"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["ANN", "ARG", "C901", "FBT", "F841", "PLC0415", "PLR0912", "PLR0913", "PLR0915", "PLW1510", "S101", "S603", "S607", "SLF", "T201"]
+"scripts/**/*.py" = ["C901", "PLR0912", "PLR0915", "S603", "S607", "T20"]
+"examples/**/*.py" = ["INP001", "T201"]
+"**/{cli,main,__main__}.py" = ["T201"]
+"src/i_insist/approval.py" = ["FBT001", "S105"]
+"src/i_insist/cli.py" = ["TRY300"]
+"src/i_insist/rules.py" = ["TRY300"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+show_error_codes = true
+pretty = true
+
+[tool.vulture]
+min_confidence = 80
+paths = ["src/i_insist", "tests"]
+exclude = [".venv/"]
+
+[tool.deptry]
+extend_exclude = ["scripts/prek_hooks"]
+known_first_party = ["i_insist"]
+
+[tool.uv]
+# Delay adoption of fresh releases; this is not a guarantee of dependency safety.
+exclude-newer = "3 days"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+addopts = "--no-header -n auto -q --durations=5 --durations-min=1.0 --cov=i_insist --cov-report=term-missing --failed-first"
+timeout = 20
+timeout_method = "thread"
+
+[tool.coverage.run]
+branch = true
+source = ["i_insist"]
+patch = ["subprocess"]
+
+[tool.coverage.report]
+fail_under = 90
+skip_empty = true
+exclude_also = [
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+    "@abc.abstractmethod",
+]

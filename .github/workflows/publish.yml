@@ -34,9 +34,7 @@ jobs:
 
       - name: Run all quality gates
         run: |
-          uv run pytest
-          uv run ruff check .
-          uv run ruff format --check .
+          uv run prek run --all-files
           uv build
 
   prepare:

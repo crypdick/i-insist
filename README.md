@@ -268,8 +268,18 @@ Public hook references: [Codex](https://learn.chatgpt.com/docs/hooks) and
 
 ## Develop
 
+Runtime type checks instrument package imports through Beartype. Development checks run through
+prek and uv; install hooks once per checkout with `uv run prek install`.
+
+Create an isolated checkout with one command:
+
+```sh
+new-feature <name> --no-agent && uv sync --locked --directory ".worktrees/<name>"
+```
+
 ```sh
 uv sync --locked
+uv run prek run --all-files
 uv run pytest
 uv run ruff check .
 uv run ruff format --check .

@@ -59,7 +59,7 @@ def shell_approved(event: Event) -> bool:
 
 
 class Approvals:
-    def __init__(self, harness: str, session_id: str):
+    def __init__(self, harness: str, session_id: str) -> None:
         root = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache")))
         key = hashlib.sha256(f"{harness}\0{session_id}".encode()).hexdigest()
         self.path = root / "i-insist" / "approvals" / f"{key}.json"
@@ -89,11 +89,7 @@ class Approvals:
             data = json.loads(self.path.read_text())
         except (OSError, ValueError):
             return False
-        return (
-            isinstance(data, dict)
-            and data.get("approved") is True
-            and data.get("turn_id") == turn_id
-        )
+        return isinstance(data, dict) and data.get("approved") is True and data.get("turn_id") == turn_id
 
 
 def context(

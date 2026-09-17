@@ -35,9 +35,7 @@ def release_version(current: str, published: list[str]) -> str:
     if not re.fullmatch(r"\d+\.\d+\.\d+", current):
         raise ValueError(f"Release version must be major.minor.patch: {current}")
     released = [
-        tuple(map(int, value.split(".")))
-        for value in published
-        if re.fullmatch(r"\d+\.\d+\.\d+", value)
+        tuple(map(int, value.split("."))) for value in published if re.fullmatch(r"\d+\.\d+\.\d+", value)
     ]
     latest = max(released, default=(-1, -1, -1))
     if tuple(map(int, current.split("."))) > latest:
@@ -48,9 +46,7 @@ def release_version(current: str, published: list[str]) -> str:
 def published_versions(project: str) -> list[str]:
     """A missing PyPI project has no releases; other registry errors must stop publication."""
     try:
-        with urllib.request.urlopen(
-            f"https://pypi.org/pypi/{project}/json", timeout=30
-        ) as response:
+        with urllib.request.urlopen(f"https://pypi.org/pypi/{project}/json", timeout=30) as response:
             return list(json.load(response)["releases"])
     except urllib.error.HTTPError as exc:
         if exc.code == 404:

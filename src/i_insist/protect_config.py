@@ -6,7 +6,7 @@ import re
 import shlex
 from pathlib import Path
 
-from i_insist.events import Event
+from i_insist.events import Event  # noqa: TC001  # Beartype resolves annotation at runtime.
 
 
 def should_block(event: Event) -> bool:
@@ -54,8 +54,5 @@ def should_block(event: Event) -> bool:
     return touches and (
         mutates
         or any(">" in word for word in words)
-        or (
-            any(Path(word).name == "sed" for word in words)
-            and any(word.startswith("-i") for word in words)
-        )
+        or (any(Path(word).name == "sed" for word in words) and any(word.startswith("-i") for word in words))
     )

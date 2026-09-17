@@ -1,3 +1,4 @@
+import os
 import subprocess
 import urllib.error
 from pathlib import Path
@@ -21,7 +22,7 @@ def test_choose_unpublished_release(current, published, expected):
 
 
 def test_only_missing_project_counts_as_first_publication(monkeypatch):
-    def unavailable(*args, **kwargs):
+    def unavailable(*args, **_kwargs):
         raise urllib.error.HTTPError("https://pypi.org", status, "registry error", {}, None)
 
     monkeypatch.setattr("urllib.request.urlopen", unavailable)
@@ -32,9 +33,16 @@ def test_only_missing_project_counts_as_first_publication(monkeypatch):
         published_versions("i-insist")
 
 
-def test_retry_reuses_release_and_overtaken_runs_are_skipped(tmp_path: Path):
+def test_retry_reuses_release_and_overtaken_runs_are_skipped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    for name in tuple(os.environ):
+        if name.startswith("GIT_"):
+            monkeypatch.delenv(name)
+
     def git(*args):
-        return subprocess.check_output(["git", "-C", str(tmp_path), *args], text=True).strip()
+        return subprocess.check_output(
+            ["git", "-c", "core.hooksPath=/dev/null", "-C", str(tmp_path), *args],
+            text=True,
+        ).strip()
 
     git("init", "-b", "main")
     git("config", "user.name", "Release test")

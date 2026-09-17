@@ -11,8 +11,9 @@ import tempfile
 import tomllib
 from importlib.resources import files
 from pathlib import Path
+from typing import cast
 
-from i_insist.events import GuardError
+from i_insist.events import GuardError, Json
 
 EVENTS = {
     "PreToolUse": "pre-tool-use",
@@ -52,28 +53,31 @@ def owned(handler: object, harness: str, event: str) -> bool:
     )
 
 
-def edit_hooks(document: dict, harness: str, install: bool) -> bool:
+def edit_hooks(document: dict[str, Json], harness: str, *, install: bool) -> bool:  # noqa: PLR0912
     if "hooks" not in document and not install:
         return False
     hooks = document.setdefault("hooks", {})
     if not isinstance(hooks, dict):
-        raise ValueError("hooks must be an object")
+        raise ValueError("hooks must be an object")  # noqa: TRY004
     changed = False
     for name, event in EVENTS.items():
         groups = hooks.get(name, [])
         if not isinstance(groups, list):
-            raise ValueError(f"hooks.{name} must be an array")
-        retained = []
+            raise ValueError(f"hooks.{name} must be an array")  # noqa: TRY004
+        retained: list[dict[str, Json]] = []
         for group in groups:
             if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
-                raise ValueError(f"hooks.{name} entries must contain a hooks array")
-            handlers = [handler for handler in group["hooks"] if not owned(handler, harness, event)]
+                raise ValueError(  # noqa: TRY004
+                    f"hooks.{name} entries must contain a hooks array"
+                )
+            group_hooks = cast("list[Json]", group["hooks"])
+            handlers = [handler for handler in group_hooks if not owned(handler, harness, event)]
             if handlers == group["hooks"]:
                 retained.append(group)
             elif handlers:
                 retained.append({**group, "hooks": handlers})
         if install:
-            entry = {
+            entry: dict[str, Json] = {
                 "hooks": [
                     {
                         "type": "command",
@@ -89,7 +93,7 @@ def edit_hooks(document: dict, harness: str, install: bool) -> bool:
             continue
         changed = True
         if retained:
-            hooks[name] = retained
+            hooks[name] = cast("list[Json]", retained)
         else:
             hooks.pop(name, None)
     if not hooks and changed:
@@ -100,7 +104,7 @@ def edit_hooks(document: dict, harness: str, install: bool) -> bool:
 def configure(harness: str, *, install: bool) -> Path:
     if os.name != "posix":
         raise GuardError("hook installation currently supports Linux and macOS")
-    import fcntl
+    import fcntl  # noqa: PLC0415 -- unavailable on unsupported platforms.
 
     path = configuration_path(harness)
     if not install and not path.exists():
@@ -113,11 +117,11 @@ def configure(harness: str, *, install: bool) -> Path:
             original = path.read_text() if path.exists() else None
             document = json.loads(original) if original is not None else {}
             if not isinstance(document, dict):
-                raise ValueError("root must be an object")
+                raise ValueError("root must be an object")  # noqa: TRY004
             if install:
                 check_enabled(document, harness, path)
                 install_config_protection()
-            if not edit_hooks(document, harness, install):
+            if not edit_hooks(document, harness, install=install):
                 return path
             updated = json.dumps(document, indent=2) + "\n"
             if updated == original:
@@ -161,14 +165,12 @@ def install_config_protection() -> None:
         pass
 
 
-def check_enabled(document: dict, harness: str, path: Path) -> None:
+def check_enabled(document: dict[str, Json], harness: str, path: Path) -> None:
     """Reject explicit disables; trust decisions remain owned by the harness."""
     check_project_settings(harness)
     if harness == "claude":
         if document.get("disableAllHooks") is True or document.get("allowManagedHooksOnly") is True:
-            raise GuardError(
-                "Claude hooks are disabled or managed-only; review /hooks and settings"
-            )
+            raise GuardError("Claude hooks are disabled or managed-only; review /hooks and settings")
         return
     root = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))).expanduser()
     config_path = root / "config.toml"
@@ -194,7 +196,8 @@ def check_enabled(document: dict, harness: str, path: Path) -> None:
         for group_index, group in enumerate(groups):
             if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
                 continue
-            for handler_index, handler in enumerate(group["hooks"]):
+            group_hooks = cast("list[Json]", group["hooks"])
+            for handler_index, handler in enumerate(group_hooks):
                 if not owned(handler, harness, EVENTS[event]):
                     continue
                 keys = [
@@ -217,19 +220,14 @@ def check_project_settings(harness: str) -> None:
             path = parent / name
             if not path.exists():
                 continue
-            data = (
-                tomllib.loads(path.read_text())
-                if harness == "codex"
-                else json.loads(path.read_text())
-            )
+            data = tomllib.loads(path.read_text()) if harness == "codex" else json.loads(path.read_text())
             if not isinstance(data, dict):
                 raise GuardError(f"configuration must be an object: {path}")
             features = data.get("features", {})
             disabled = (
                 features.get("hooks", features.get("codex_hooks", True)) is False
                 if harness == "codex"
-                else data.get("disableAllHooks") is True
-                or data.get("allowManagedHooksOnly") is True
+                else data.get("disableAllHooks") is True or data.get("allowManagedHooksOnly") is True
             )
             if disabled:
                 raise GuardError(f"Hooks are disabled by {path}; enable them before migration")

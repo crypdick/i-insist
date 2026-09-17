@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
 
-type Json = None | bool | int | float | str | list[Json] | dict[str, Json]
+type Json = bool | int | float | str | list[Json] | dict[str, Json] | None
 type Kind = Literal["shell", "file_write", "file_edit", "other"]
 
 
@@ -67,7 +67,7 @@ class Event:
         elif command is not None:
             raise GuardError("input command must be null for non-shell tools")
         return cls(
-            cast(Kind, kind),
+            cast("Kind", kind),
             command,
             cwd,
             tuple(absolute_path(text_field(path, "path"), cwd) for path in paths),
@@ -100,9 +100,7 @@ def normalize_hook(data: dict[str, Json], harness: str) -> Event:
         paths.append(absolute_path(text_field(target, "file_path"), cwd))
     elif name == "apply_patch":
         kind = "file_edit"
-        patch = (
-            native if isinstance(native, str) else arguments.get("command", arguments.get("patch"))
-        )
+        patch = native if isinstance(native, str) else arguments.get("command", arguments.get("patch"))
         patch = text_field(patch, "patch")
         for line in patch.splitlines():
             for prefix in (

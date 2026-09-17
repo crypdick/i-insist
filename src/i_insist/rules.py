@@ -55,12 +55,12 @@ def load_rules(path: Path) -> list[Rule]:
             raise ValueError("unknown top-level fields; expected [[rules]]")
         entries = document.get("rules", [])
         if not isinstance(entries, list):
-            raise ValueError("rules must be an array of tables")
+            raise ValueError("rules must be an array of tables")  # noqa: TRY004
         result = []
         ids = set()
         for entry in entries:
             if not isinstance(entry, dict):
-                raise ValueError("each rule must be a table")
+                raise ValueError("each rule must be a table")  # noqa: TRY004
             if entry.keys() - {"id", "checker", "message", "enabled", "timeout", "overridable"}:
                 raise ValueError("unknown rule fields")
             name, checker, message = (entry.get(key) for key in ("id", "checker", "message"))
@@ -74,22 +74,18 @@ def load_rules(path: Path) -> list[Rule]:
                 or any(not isinstance(arg, str) or "\0" in arg for arg in checker)
                 or not checker[0]
             ):
-                raise ValueError(
-                    f"{name}: checker must be a nonempty argument list without NUL bytes"
-                )
+                raise ValueError(f"{name}: checker must be a nonempty argument list without NUL bytes")
             enabled = entry.get("enabled", True)
             if not isinstance(enabled, bool):
-                raise ValueError(f"{name}: enabled must be a boolean")
+                raise ValueError(f"{name}: enabled must be a boolean")  # noqa: TRY004
             overridable = entry.get("overridable", True)
             if not isinstance(overridable, bool):
-                raise ValueError(f"{name}: overridable must be a boolean")
+                raise ValueError(f"{name}: overridable must be a boolean")  # noqa: TRY004
             timeout = entry.get("timeout", 10)
             if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
                 raise ValueError(f"{name}: timeout must be a positive finite number")
             result.append(
-                Rule(
-                    name, tuple(checker), message, path.parent, enabled, float(timeout), overridable
-                )
+                Rule(name, tuple(checker), message, path.parent, enabled, float(timeout), overridable)
             )
             ids.add(name)
         return result
@@ -100,7 +96,7 @@ def load_rules(path: Path) -> list[Rule]:
 def run_checker(rule: Rule, event: Event) -> bool:
     try:
         payload = json.dumps(event.as_json(), allow_nan=False)
-        with subprocess.Popen(
+        with subprocess.Popen(  # noqa: S603 -- provider checker argv is this tool's contract.
             rule.checker,
             cwd=rule.directory,
             stdin=subprocess.PIPE,
@@ -122,9 +118,7 @@ def run_checker(rule: Rule, event: Event) -> bool:
                 process.communicate()
                 raise GuardError(f"checker {rule.id}: timed out after {rule.timeout:g}s") from None
             if process.returncode:
-                raise GuardError(
-                    f"checker {rule.id}: exited {process.returncode}: {stderr.strip()[:1000]}"
-                )
+                raise GuardError(f"checker {rule.id}: exited {process.returncode}: {stderr.strip()[:1000]}")
     except (OSError, UnicodeError, ValueError) as exc:
         raise GuardError(f"checker {rule.id}: {exc}") from exc
     try:
