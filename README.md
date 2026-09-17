@@ -1,6 +1,6 @@
 # i-insist
 
-Block agent tool calls using your own checks. Say **“I insist”** to override them.
+Block agent tool calls using your own checks. Say `I insist` to override them.
 
 Rules live in `~/.i-insist/*.toml` globally and `.i-insist/*.toml` within a
 directory or repository. Each rule runs a program you own and displays your
@@ -23,10 +23,10 @@ Run the install command only for the harnesses you use. It registers
 - Codex: `~/.codex/hooks.json`, or `$CODEX_HOME/hooks.json`.
 - Claude Code: `~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR/settings.json`.
 
-The installer preserves other settings and hooks, keeps existing file permissions
-and symlinks, and can be run repeatedly without duplicate registrations. Writes
-are atomic; concurrent i-insist installers coordinate through a lock file beside
-the configuration. Start a new harness session after installation and review
+The installer preserves other settings, hooks, file permissions, and symlinks.
+Repeated runs don't create duplicate registrations. The installer writes files
+atomically, and concurrent i-insist installers coordinate through a lock file beside
+the configuration. Start a new harness session after installation and examine
 Codex hooks through `/hooks` when required by your settings.
 
 Update the shared runner through uv:
@@ -80,8 +80,8 @@ message = "These originals require your permission to edit."
 ```
 
 `enabled` defaults to `true`. A disabled rule's checker does not run.
-`timeout` is the checker's time limit in seconds; it defaults to 10 and must be
-positive. Each TOML can contain multiple `[[rules]]`. IDs must be unique within
+`timeout` is the checker's time limit in seconds. It defaults to 10 and must be
+positive. Each TOML file can contain multiple `[[rules]]`. IDs must be unique within
 their file. Invalid configuration blocks execution rather than silently omitting
 a check, including invalid fields on disabled rules.
 
@@ -91,18 +91,18 @@ without a shell. Use `sh` explicitly if you want a shell script. The checker run
 from its TOML file's directory, so relative script paths resolve there. The
 intercepted tool's working directory is passed in the event as `cwd`.
 
-Discovery combines:
+Rule discovery checks these locations:
 
 1. `~/.i-insist/*.toml`.
 2. `.i-insist/*.toml` in ancestors of the tool's working directory, outermost first.
 3. The same ancestry for explicit file targets, in target order. This protects
    direct edits made from outside the target directory.
 
-Directories are resolved and deduplicated; each directory's TOML files run in
-filename order, with rules in declaration order. Discovery does not recursively
+Rule discovery resolves and deduplicates directories. Each directory's TOML files
+run in filename order, with rules in declaration order. Discovery doesn't recursively
 scan `.i-insist/` subdirectories. Paths use their physical, symlink-resolved
-locations. Global and local rules accumulate; a local disabled rule does not
-disable a global rule with the same ID. The first matching rule supplies the
+locations. Global and local rules accumulate. A local disabled rule doesn't
+turn off a global rule with the same ID. The first matching rule supplies the
 block message, unchanged.
 
 Shell text is opaque to discovery: `cd`, `git -C`, shell write targets, and paths
@@ -112,7 +112,7 @@ invocation reaches, or resolve their targets in your provider's checker.
 ## Write a checker
 
 Read one JSON object on stdin. Print exactly one JSON boolean on stdout and exit
-with status 0: `true` blocks; `false` allows the next check. Write any debugging
+with status 0. `true` blocks, and `false` allows the next check. Write any debugging
 output to stderr. Checker crashes, invalid output, missing executables, and
 timeouts block with an error. On POSIX, timeout cleanup kills the checker process
 group, including its children unless they detach into another session.
@@ -133,7 +133,7 @@ print(json.dumps(should_block(json.load(sys.stdin))))
 This example protects **direct file edits**. It does not parse shell writes.
 A runnable copy is in [examples/project](examples/project).
 
-Checker input:
+The checker receives input in this format:
 
 ```json
 {
@@ -148,12 +148,14 @@ Checker input:
 }
 ```
 
+The fields have these meanings:
+
 | Field | Meaning |
 | --- | --- |
 | `kind` | `shell`, `file_write`, `file_edit`, or `other` |
 | `command` | Shell text, or `null` for other tools |
 | `cwd` | Absolute working directory of the intercepted operation |
-| `paths` | Absolute explicit file targets; empty when targets are unknown |
+| `paths` | Absolute explicit file targets, or empty when targets are unknown |
 | `harness` | Adapter identity, such as `codex` or `claude` |
 | `tool_name` | Original tool name |
 | `tool_input` | Original tool arguments, unchanged, including unknown fields |
@@ -162,7 +164,7 @@ Checker input:
 Adapters recognize shell calls and common direct editing tools, including
 `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, and `apply_patch`. Patch targets
 include additions, updates, deletions, and both sides of renames. Unknown tools
-still reach every applicable checker as `other`; custom policies can inspect
+still reach every applicable checker as `other`. Custom policies can inspect
 their original names and arguments.
 
 Since 0.3.0, content checkers can use `changes` without parsing tool arguments.
@@ -183,7 +185,7 @@ in rule discovery even when omitted from `paths`. Existing callers can omit
 Providers own their TOML, checker programs, and dependencies. Installers should
 update only their own files, preserve user changes such as `enabled = false`,
 and remove their registrations on uninstall. Existing plugin-specific policy
-configuration can stay where it is; the provider's checker reads it.
+configuration can remain in place. The provider's checker reads it.
 
 ## Protecting configuration
 
@@ -231,7 +233,7 @@ not grant approval. A phrase embedded in another sentence does not match.
 `UserPromptSubmit` records approval for the current response. Subsequent tool
 calls in that response bypass these rules, including direct file edits and custom
 tools. A new user message replaces the approval with that message's decision.
-Starting or resuming a session clears approval; compaction preserves it. Codex
+Starting or resuming a session clears approval. Compaction preserves it. Codex
 also requires the same `turn_id`, so approval does not transfer to another turn.
 The agent remains responsible for respecting the scope you described.
 
@@ -243,7 +245,8 @@ HUMAN_PERMISSION_GRANTED=1 some-command
 ```
 
 This skips checks for that shell **tool call**, including any chained commands in
-it; it does not persist to later calls. Only a leading assignment is recognized.
+it. The approval doesn't persist to later calls. Only a leading assignment is
+recognized.
 Mentions in arguments or comments and inherited/exported environment variables
 do not grant approval. Approval never overrides another plugin or the harness's
 own permission policy.
@@ -264,7 +267,7 @@ i-insist check < event.json
 
 The result is `{"blocked": false, "message": null}` or
 `{"blocked": true, "message": "your configured message"}`. Both normal decisions
-exit 0; input/configuration/checker failures return `blocked: true` and exit 2.
+exit 0. Input, configuration, or checker failures return `blocked: true` and exit 2.
 The caller must honor both the decision and execution failures. This endpoint
 recognizes the shell marker but does not read Codex/Claude approval state.
 
@@ -285,8 +288,9 @@ Public hook references: [Codex](https://learn.chatgpt.com/docs/hooks) and
 
 ## Develop
 
-Runtime type checks instrument package imports through Beartype. Development checks run through
-prek and uv; install hooks once per checkout with `uv run prek install`.
+Beartype instruments package imports with runtime type checks. Development checks
+run through prek and uv. Install hooks once per checkout with
+`uv run prek install`.
 
 Create an isolated checkout with one command:
 
@@ -318,7 +322,7 @@ on pull requests. Each successful push to `main` publishes a release to PyPI
 and creates a GitHub release with the wheel and source distribution attached.
 Manual workflow dispatch retries a release without needing another commit.
 
-The workflow preserves an unpublished version from `pyproject.toml`; otherwise,
+The workflow preserves an unpublished version from `pyproject.toml`. Otherwise,
 it increments the latest stable PyPI patch version. Use `uv version --bump minor`
 or `uv version --bump major` for an intentional version change. The release
 commit updates `pyproject.toml` and `uv.lock` together. Superseded runs are
