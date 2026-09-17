@@ -121,23 +121,17 @@ def patch_changes(patch: str, cwd: Path) -> tuple[FileChange, ...]:
                 "*** Update File": "edit",
                 "*** Delete File": "delete",
             }[action]
-            changes.append(
-                FileChange.from_json({"path": target, "operation": operation, "content": ""}, cwd)
-            )
+            changes.append(FileChange.from_json({"path": target, "operation": operation, "content": ""}, cwd))
         elif line.startswith("*** Move to: "):
             if not changes or changes[-1].operation != "edit":
                 raise GuardError("input patch move needs an update target")
             source = changes[-1]
             changes[-1] = FileChange(source.path, "delete", "")
-            target = absolute_path(
-                text_field(line.removeprefix("*** Move to: "), "patch path"), cwd
-            )
-            changes.append(FileChange(target, "write", source.content))
+            destination = absolute_path(text_field(line.removeprefix("*** Move to: "), "patch path"), cwd)
+            changes.append(FileChange(destination, "write", source.content))
         elif line.startswith("+") and changes:
             change = changes[-1]
-            changes[-1] = FileChange(
-                change.path, change.operation, change.content + line[1:] + "\n"
-            )
+            changes[-1] = FileChange(change.path, change.operation, change.content + line[1:] + "\n")
     if not changes:
         raise GuardError("input patch contains no file targets")
     return tuple(FileChange(c.path, c.operation, c.content.removesuffix("\n")) for c in changes)
@@ -178,9 +172,7 @@ def normalize_hook(data: dict[str, Json], harness: str) -> Event:
         target = arguments.get("file_path", arguments.get("path", arguments.get("notebook_path")))
         paths.append(absolute_path(text_field(target, "file_path"), cwd))
         changes = (
-            FileChange(
-                paths[0], "write" if kind == "file_write" else "edit", file_content(arguments)
-            ),
+            FileChange(paths[0], "write" if kind == "file_write" else "edit", file_content(arguments)),
         )
     elif name == "apply_patch":
         kind = "file_edit"
