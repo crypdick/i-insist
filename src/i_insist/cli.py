@@ -54,7 +54,7 @@ def run_hook(data: dict[str, Json], harness: str, event_name: str) -> None:
                             ".i-insist/*.toml rules. "
                             "When blocked, show the configured message and follow its guidance. "
                             "Only the human can authorize an override. "
-                            "A standalone line 'I insist' in their latest message permits calls "
+                            "The phrase 'I insist' anywhere in their latest message (case-insensitive) permits calls "
                             "for that response, except rules marked overridable = false. "
                             "For an explicitly authorized shell invocation, "
                             "you may prefix HUMAN_PERMISSION_GRANTED=1; never export it or "

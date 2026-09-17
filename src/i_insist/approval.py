@@ -14,29 +14,8 @@ from i_insist.events import Event, GuardError, Json, text_field
 
 
 def prompt_approves(prompt: str) -> bool:
-    # NOTE: README defines a standalone phrase, excluding fenced/quoted examples.
-    fence: str | None = None
-    for line in prompt.splitlines():
-        stripped = line.strip()
-        match = re.match(r"(`{3,}|~{3,})", stripped)
-        if match:
-            marker = match[0]
-            if fence is None:
-                fence = marker
-            elif marker[0] == fence[0] and len(marker) >= len(fence):
-                fence = None
-            continue
-        if (
-            fence is None
-            and not line.startswith(("    ", "\t"))
-            and re.fullmatch(
-                r"i\s+insist[.!]?",
-                stripped,
-                flags=re.IGNORECASE,
-            )
-        ):
-            return True
-    return False
+    # NOTE: README defines case-insensitive substring matching anywhere in the human prompt.
+    return "i insist" in prompt.casefold()
 
 
 def shell_approved(event: Event) -> bool:

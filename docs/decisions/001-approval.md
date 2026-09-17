@@ -7,7 +7,7 @@ rejected an `allow-once <blocked-call-id>` workflow as too complex. Direct editi
 tools cannot carry an inline shell environment assignment, and approval should
 allow several operations during a response.
 
-Use the public `UserPromptSubmit` hook to recognize a standalone `I insist` line
+Use the public `UserPromptSubmit` hook to recognize `i insist` anywhere in the human message, ignoring case,
 and record a session-scoped approval. `PreToolUse` checks that record. Codex also
 matches its public turn ID. Reset on a new prompt or session startup/resume,
 preserve through compaction, and retain the inline environment marker for shell
