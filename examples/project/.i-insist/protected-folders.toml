@@ -1,0 +1,5 @@
+[[rules]]
+id = "example/protected-folders"
+checker = ["python3", "../tools/protect_folders.py"]
+message = "These originals require your permission to edit. Say 'I insist' on its own line to proceed."
+# enabled = false
