@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from importlib.metadata import version
 
 from i_insist.approval import context, prompt_approves, shell_approved
 from i_insist.events import Event, GuardError, Json, normalize_hook, object_input
@@ -76,6 +77,7 @@ def main() -> int:
         description="Run agent tool guards and human overrides.",
         epilog="Documentation: https://github.com/crypdick/i-insist#readme",
     )
+    parser.add_argument("--version", action="version", version=f"i-insist {version('i-insist')}")
     commands = parser.add_subparsers(dest="command", required=True)
     hook = commands.add_parser("hook", help="Handle a public harness hook payload on stdin")
     hook.add_argument("--harness", choices=("codex", "claude"), required=True)
