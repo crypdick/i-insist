@@ -155,7 +155,15 @@ def test_config_protection_requires_human_approval(workspace: Path, name, argume
     allowed(invoke(workspace, payload))
 
 
-@pytest.mark.parametrize("command", ["cat .i-insist/policy.toml", "rg enabled ~/.i-insist", "git status"])
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat .i-insist/policy.toml",
+        "rg enabled ~/.i-insist",
+        "ls -la .codex .i-insist 2>/dev/null || true",
+        "git status",
+    ],
+)
 def test_config_protection_allows_reads(workspace: Path, command: str):
     installed = subprocess.run(
         [sys.executable, "-m", "i_insist", "install", "codex"], capture_output=True, text=True

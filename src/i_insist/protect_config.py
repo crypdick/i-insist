@@ -56,8 +56,14 @@ def should_block(event: Event) -> bool:
         or re.fullmatch(r"python3\.\d+", Path(word).name)
         for word in words
     )
+    redirects_to_config = any(
+        ">" in word
+        and index + 1 < len(words)
+        and ".i-insist" in (event.cwd / Path(words[index + 1]).expanduser()).resolve().parts
+        for index, word in enumerate(words)
+    )
     return touches and (
         mutates
-        or any(">" in word for word in words)
+        or redirects_to_config
         or (any(Path(word).name == "sed" for word in words) and any(word.startswith("-i") for word in words))
     )
