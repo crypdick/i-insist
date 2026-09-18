@@ -26,9 +26,7 @@ def rule(directory: Path, script: str, *, name: str = "guard", extra: str = "") 
     checker.write_text(script)
     path = config / f"{name}.toml"
     path.write_text(
-        f'[[rules]]\nid = "{name}"\n'
-        f"checker = {json.dumps([sys.executable, '../' + checker.name])}\n"
-        f'message = "Blocked by {name}"\n{extra}'
+        f'[[rules]]\nid = "{name}"\nchecker = {json.dumps([sys.executable, "../" + checker.name])}\n{extra}'
     )
     return path
 

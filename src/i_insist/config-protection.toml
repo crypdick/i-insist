@@ -1,4 +1,3 @@
 [[rules]]
 id = "protect-config"
 checker = ["i-insist", "protect-config"]
-message = "Editing i-insist configuration requires human approval. Show the intended rule change and ask the human to say I insist. Do not modify rules to evade a block."

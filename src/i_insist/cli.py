@@ -52,7 +52,7 @@ def run_hook(data: dict[str, Json], harness: str, event_name: str) -> None:
                         "additionalContext": (
                             "i-insist checks tool calls using global and directory-local "
                             ".i-insist/*.toml rules. "
-                            "When blocked, show the configured message and follow its guidance. "
+                            "When blocked, show the checker message and follow its guidance. "
                             "Only the human can authorize an override. "
                             "The phrase 'I insist' anywhere in their latest message (case-insensitive) permits calls "
                             "for that response, except rules marked overridable = false. "
@@ -107,9 +107,9 @@ def main() -> int:
             return 0
         data = object_input(json.load(sys.stdin, parse_constant=reject_constant))
         if args.command == "protect-config":
-            from i_insist.protect_config import should_block  # noqa: PLC0415
+            from i_insist.protect_config import DENIAL_MESSAGE, should_block  # noqa: PLC0415
 
-            print(json.dumps(should_block(Event.from_json(data))))
+            print(json.dumps(DENIAL_MESSAGE if should_block(Event.from_json(data)) else None))
         elif args.command == "hook":
             run_hook(data, args.harness, args.event)
         else:

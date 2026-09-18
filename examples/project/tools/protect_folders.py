@@ -10,4 +10,5 @@ def should_block(event: dict) -> bool:
 
 
 if __name__ == "__main__":
-    print(json.dumps(should_block(json.load(sys.stdin))))
+    message = "These originals require your permission to edit. Ask the human to say I insist."
+    print(json.dumps(message if should_block(json.load(sys.stdin)) else None))

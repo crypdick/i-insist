@@ -156,13 +156,18 @@ def configure(harness: str, *, install: bool) -> Path:
 def install_config_protection() -> None:
     destination = Path.home() / ".i-insist" / "i-insist.toml"
     destination.parent.mkdir(parents=True, exist_ok=True)
-    # Existing user edits, including enabled = false, remain authoritative.
+    # NOTE: README's Protecting configuration describes provider-owned replacement.
     source = files("i_insist").joinpath("config-protection.toml").read_text()
+    destination = destination.resolve()
+    temporary = None
     try:
-        with destination.open("x") as stream:
+        with tempfile.NamedTemporaryFile(mode="w", dir=destination.parent, delete=False) as stream:
+            temporary = Path(stream.name)
             stream.write(source)
-    except FileExistsError:
-        pass
+        temporary.replace(destination)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def check_enabled(document: dict[str, Json], harness: str, path: Path) -> None:

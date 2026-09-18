@@ -18,9 +18,7 @@ from i_insist.events import Event, GuardError
 class Rule:
     id: str
     checker: tuple[str, ...]
-    message: str
     directory: Path
-    enabled: bool
     timeout: float
     overridable: bool
 
@@ -61,13 +59,11 @@ def load_rules(path: Path) -> list[Rule]:
         for entry in entries:
             if not isinstance(entry, dict):
                 raise ValueError("each rule must be a table")  # noqa: TRY004
-            if entry.keys() - {"id", "checker", "message", "enabled", "timeout", "overridable"}:
+            if entry.keys() - {"id", "checker", "timeout", "overridable"}:
                 raise ValueError("unknown rule fields")
-            name, checker, message = (entry.get(key) for key in ("id", "checker", "message"))
+            name, checker = (entry.get(key) for key in ("id", "checker"))
             if not isinstance(name, str) or not name.strip() or name in ids:
                 raise ValueError("each rule needs a nonempty id unique within its file")
-            if not isinstance(message, str) or not message.strip():
-                raise ValueError(f"{name}: message must be a nonempty string")
             if (
                 not isinstance(checker, list)
                 or not checker
@@ -75,25 +71,20 @@ def load_rules(path: Path) -> list[Rule]:
                 or not checker[0]
             ):
                 raise ValueError(f"{name}: checker must be a nonempty argument list without NUL bytes")
-            enabled = entry.get("enabled", True)
-            if not isinstance(enabled, bool):
-                raise ValueError(f"{name}: enabled must be a boolean")  # noqa: TRY004
             overridable = entry.get("overridable", True)
             if not isinstance(overridable, bool):
                 raise ValueError(f"{name}: overridable must be a boolean")  # noqa: TRY004
             timeout = entry.get("timeout", 10)
             if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
                 raise ValueError(f"{name}: timeout must be a positive finite number")
-            result.append(
-                Rule(name, tuple(checker), message, path.parent, enabled, float(timeout), overridable)
-            )
+            result.append(Rule(name, tuple(checker), path.parent, float(timeout), overridable))
             ids.add(name)
         return result
     except (OSError, ValueError) as exc:
         raise GuardError(f"configuration {path}: {exc}") from exc
 
 
-def run_checker(rule: Rule, event: Event) -> bool:
+def run_checker(rule: Rule, event: Event) -> str | None:
     try:
         payload = json.dumps(event.as_json(), allow_nan=False)
         with subprocess.Popen(  # noqa: S603 -- provider checker argv is this tool's contract.
@@ -118,16 +109,16 @@ def run_checker(rule: Rule, event: Event) -> bool:
                 process.communicate()
                 raise GuardError(f"checker {rule.id}: timed out after {rule.timeout:g}s") from None
             if process.returncode:
-                raise GuardError(f"checker {rule.id}: exited {process.returncode}: {stderr.strip()[:1000]}")
+                raise GuardError(f"checker {rule.id}: exited {process.returncode}: {stderr.strip()}")
     except (OSError, UnicodeError, ValueError) as exc:
         raise GuardError(f"checker {rule.id}: {exc}") from exc
     try:
         result = json.loads(stdout)
-    except ValueError:
-        result = None
-    if not isinstance(result, bool):
-        raise GuardError(f"checker {rule.id}: checker must print a JSON boolean")
-    return result
+    except ValueError as exc:
+        raise GuardError(f"checker {rule.id}: checker must print JSON null or a nonempty string") from exc
+    if result is None or (isinstance(result, str) and result.strip()):
+        return result
+    raise GuardError(f"checker {rule.id}: checker must print JSON null or a nonempty string")
 
 
 def check(event: Event, *, approved: bool = False) -> str | None:
@@ -136,6 +127,9 @@ def check(event: Event, *, approved: bool = False) -> str | None:
     except OSError as exc:
         raise GuardError(f"configuration discovery: {exc}") from exc
     for rule in rules:
-        if rule.enabled and not (approved and rule.overridable) and run_checker(rule, event):
-            return rule.message
+        if approved and rule.overridable:
+            continue
+        message = run_checker(rule, event)
+        if message is not None:
+            return message
     return None
