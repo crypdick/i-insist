@@ -1,7 +1,7 @@
 # Development
 
 Keep provider policy out of the runner. Harness-specific payload handling belongs
-in adapters; checkers receive the documented neutral event.
+in adapters. Checkers receive the documented neutral event.
 
 Use `uv`. Before committing, run:
 
@@ -13,12 +13,12 @@ uv build
 ```
 
 Follow [CONVENTIONS.md](CONVENTIONS.md), [architecture map](docs/ARCHITECTURE.md), and
-[quality policy](docs/QUALITY.md). Architecture policy is documented rather than enforced by a
-separate boundary checker while `i_insist` remains one package.
+[quality policy](docs/QUALITY.md). While `i_insist` remains one package, use these
+documents to guide architecture reviews without a separate boundary checker.
 
-For behavior changes and bug fixes, use red/green TDD: first confirm a focused behavior test fails
+For behavior changes and bug fixes, use red/green test-driven development: first confirm a focused behavior test fails
 for the expected reason, make the smallest passing change, then refactor while it stays green.
 
 Changes to configuration, approval scope, or the checker protocol need matching
-behavior tests and README updates. Do not enable new guards in the development
+behavior tests and README updates. Don't enable new guards in the development
 session or migrate other plugins without including that work in the task scope.

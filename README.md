@@ -1,15 +1,12 @@
 # i-insist
 
-Block agent tool calls using your own checks. Say `I insist` to override them.
-
-Rules live in `~/.i-insist/*.toml` globally and `.i-insist/*.toml` within a
-directory or repository. Each rule runs a provider-owned checker and displays the denial message
-returned by that checker. Codex and Claude Code integrations use
-public lifecycle hooks. Other harnesses can use the neutral JSON interface.
+Block agent tool calls with checks from your plugins or your own scripts.
+Works with Codex and Claude Code. When a check blocks an action, the agent sees
+the reason and stops. Say `I insist` when you want to override it.
 
 ## Install
 
-Requires Python 3.12 or newer. Hook installation supports Linux and macOS.
+Requires [uv](https://docs.astral.sh/uv/), Python 3.12 or newer, and Linux or macOS.
 
 ```sh
 uv tool install 'git+https://github.com/crypdick/i-insist@main'
@@ -17,34 +14,51 @@ i-insist install codex
 i-insist install claude
 ```
 
-Run the install command only for the harnesses you use. It registers
-`PreToolUse`, `UserPromptSubmit`, and `SessionStart` hooks in:
+Install only the integrations you use. Restart the agent and check hook trust
+with `/hooks`.
 
-- Codex: `~/.codex/hooks.json`, or `$CODEX_HOME/hooks.json`.
-- Claude Code: `~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR/settings.json`.
+## Rules
 
-The installer preserves other settings, hooks, file permissions, and symlinks.
-Repeated runs don't create duplicate registrations. The installer writes files
-atomically, and concurrent i-insist installers coordinate through a lock file beside
-the configuration. Start a new harness session after installation and examine
-Codex hooks through `/hooks` when required by your settings.
+Plugins supply their own checks. Rules live in `~/.i-insist/*.toml` for global
+use or `.i-insist/*.toml` within a project. Global and applicable local rules
+run together.
 
-Update the shared runner through uv:
+Installation includes a rule requiring human approval to change `.i-insist`
+files. Other checks come from your plugins or scripts.
+
+To write your own, start with the [runnable example](examples/project) and
+[rule and checker reference](docs/reference.md#add-a-rule).
+Plugin installers replace their generated registrations, so don't edit those
+files to customize a plugin.
+
+## Human overrides
+
+Include `I insist` anywhere in your message, in any capitalization:
+
+```text
+I insist, update both protected files.
+```
+
+Approval lasts for the current response and resets with your next message or
+when you start or resume a session. Quoted text and code blocks count too.
+
+Rules marked `overridable = false` still run. Invalid configuration still blocks
+approved calls. Approval doesn't override other plugins or the agent's own
+permissions.
+
+These are cooperative guards, not a sandbox. They depend on the agent calling
+hooks, and checkers run with your account's privileges.
+
+## Update or uninstall
+
+Update the runner, then repeat the install command for each integration you use
+if the update changes hook registrations:
 
 ```sh
 uv tool upgrade i-insist
 ```
 
-Re-run `i-insist install <harness>` when an update changes hook registrations.
-There is no separately installed native plugin or second copy of the runner.
-
-For a checkout under development:
-
-```sh
-uv tool install --reinstall .
-```
-
-To remove the integration, unregister hooks before uninstalling the tool:
+To uninstall, remove each integration you installed before removing the runner:
 
 ```sh
 i-insist uninstall codex
@@ -52,304 +66,9 @@ i-insist uninstall claude
 uv tool uninstall i-insist
 ```
 
-Uninstall removes only i-insist's hook handlers. It leaves provider rules,
-approval caches, and unrelated configuration intact.
+Uninstall leaves provider rules and approval caches in place.
 
-No rules are installed automatically. Existing guards from other plugins remain
-independent until their providers migrate them.
+## Reference
 
-## Add a rule
-
-Track these files in a repository, or put equivalent TOML under `~/.i-insist/`:
-
-```text
-my-project/
-├── .i-insist/
-│   └── protected-folders.toml
-└── tools/
-    └── protect_folders.py
-```
-
-```toml
-[[rules]]
-id = "my-plugin/protected-folders"
-checker = ["python3", "../tools/protect_folders.py"]
-# timeout = 10
-```
-
-Registrations are generated and owned by their provider. There are no user
-customization fields: setup replaces the provider's registration with its current
-template. Messages live in the checker, and `enabled` is not supported.
-`timeout` is the checker's time limit in seconds. It defaults to 10 and must be
-positive. Each TOML file can contain multiple `[[rules]]`. IDs must be unique within
-their file. Invalid configuration blocks execution rather than silently omitting
-a check. Legacy `message` and `enabled` fields are rejected.
-
-Checker locations are unrestricted. `.i-insist/scripts/` is an optional
-convention, not a requirement. The checker is an argument list executed directly,
-without a shell. Use `sh` explicitly if you want a shell script. The checker runs
-from its TOML file's directory, so relative script paths resolve there. The
-intercepted tool's working directory is passed in the event as `cwd`.
-
-Rule discovery checks these locations:
-
-1. `~/.i-insist/*.toml`.
-2. `.i-insist/*.toml` in ancestors of the tool's working directory, outermost first.
-3. The same ancestry for explicit file targets, in target order. This protects
-   direct edits made from outside the target directory.
-
-Rule discovery resolves and deduplicates directories. Each directory's TOML files
-run in filename order, with rules in declaration order. Discovery doesn't recursively
-scan `.i-insist/` subdirectories. Paths use their physical, symlink-resolved
-locations. Global and local rules accumulate. The first checker to return a denial supplies
-the block message, unchanged.
-
-Shell text is opaque to discovery: `cd`, `git -C`, shell write targets, and paths
-inside custom tool arguments are not inferred. Put such policies at a scope the
-invocation reaches, or resolve their targets in your provider's checker.
-
-## Write a checker
-
-Read one JSON object on stdin. Print exactly one JSON value on stdout and exit
-with status 0: `null` allows the next check; a nonempty string blocks and is shown
-unchanged as the denial message. Booleans, empty or whitespace-only strings, other
-JSON values, and extra output are protocol errors. Write debugging output to stderr.
-
-Let policy evaluation errors fail the checker. Do not catch an error and return
-`null`: that falsely reports permission to proceed. Checkers run as subprocesses;
-i-insist detects a nonzero exit and reports the exit status and complete stderr,
-including any exception traceback. Missing executables, invalid output, and
-timeouts also block with an error. On POSIX, timeout cleanup kills the checker process
-group, including its children unless they detach into another session.
-
-```python
-import json
-import sys
-from pathlib import Path
-
-
-def should_block(event: dict) -> bool:
-    return any("_sources" in Path(path).parts for path in event["paths"])
-
-
-message = "These originals require your permission to edit. Ask the human to say I insist."
-print(json.dumps(message if should_block(json.load(sys.stdin)) else None))
-```
-
-This example protects **direct file edits**. It does not parse shell writes.
-A runnable copy is in [examples/project](examples/project).
-
-The checker receives input in this format:
-
-```json
-{
-  "kind": "file_write",
-  "command": null,
-  "cwd": "/repo",
-  "paths": ["/repo/_sources/original.txt"],
-  "harness": "claude",
-  "tool_name": "Write",
-  "tool_input": {"file_path": "_sources/original.txt", "content": "replacement"},
-  "changes": [{"path": "/repo/_sources/original.txt", "operation": "write", "content": "replacement"}]
-}
-```
-
-The fields have these meanings:
-
-| Field | Meaning |
-| --- | --- |
-| `kind` | `shell`, `file_write`, `file_edit`, or `other` |
-| `command` | Shell text, or `null` for other tools |
-| `cwd` | Absolute working directory of the intercepted operation |
-| `paths` | Absolute explicit file targets, or empty when targets are unknown |
-| `harness` | Adapter identity, such as `codex` or `claude` |
-| `tool_name` | Original tool name |
-| `tool_input` | Original tool arguments, unchanged, including unknown fields |
-| `changes` | File changes: absolute `path`, `operation` (`write`, `edit`, or `delete`), and text `content` |
-
-Adapters recognize shell calls and common direct editing tools, including
-`Write`, `Edit`, `MultiEdit`, `NotebookEdit`, and `apply_patch`. Patch targets
-include additions, updates, deletions, and both sides of renames. Unknown tools
-still reach every applicable checker as `other`. Custom policies can inspect
-their original names and arguments.
-
-Since 0.3.0, content checkers can use `changes` without parsing tool arguments.
-Writes contain the supplied body; edits contain replacement text; MultiEdit
-joins replacement strings with newlines; notebook edits contain the supplied
-cell source. Patches contain added lines for each target. A rename produces a
-source deletion and destination write. Deletions have empty content. Shell and
-unknown tools have no inferred file changes.
-
-`content` is the supplied text, not a reconstruction of the resulting file.
-Checks that need existing content must read the file themselves. Patch fragments
-may not contain complete frontmatter or other surrounding syntax.
-
-Custom harnesses can pass `changes` to `i-insist check`; their paths participate
-in rule discovery even when omitted from `paths`. Existing callers can omit
-`changes`, but checkers requiring file content may reject those events.
-
-Providers own their TOML, checker programs, messages, and dependencies. Installers
-replace only their own registrations atomically from the current template, including
-removing obsolete rules. They leave other providers' files alone and remove their
-own registrations on uninstall. Installed registrations are not a customization
-interface; human approval remains the supported way to override overridable rules. Existing plugin-specific policy
-configuration can remain in place. The provider's checker reads it.
-
-## Upgrade from 0.3.x
-
-Version 0.4.0 changes the checker protocol and registration schema. Upgrade each
-provider to emit a denial string or `null`, then regenerate its registrations:
-remove `message` and `enabled`, and move denial text into checker code. Old
-registrations and boolean checkers fail closed; there is no compatibility fallback.
-Providers must require i-insist 0.4.0 or later before replacing their registrations.
-
-Coordinate runner and provider upgrades, then restart the harness. The runner
-cannot regenerate another provider's files: that provider's setup owns migration.
-See [the ownership decision](docs/decisions/003-checker-owned-policy.md).
-
-## Protecting configuration
-
-`i-insist install` installs `~/.i-insist/i-insist.toml`. Its checker blocks
-explicit file edits under `.i-insist` and common shell mutations that name those
-directories. Human approval is required for registration changes. The same rule ships in [examples/config-protection.toml](examples/config-protection.toml).
-Repeated installation regenerates this provider-owned registration.
-
-The shell check recognizes common file commands, redirections, in-place `sed`,
-and interpreter commands naming `.i-insist`. Opaque scripts, dynamically
-constructed paths, and commands that change directories internally can evade
-it. This remains a cooperative guard, not a filesystem sandbox.
-
-## Provider dependency setup
-
-Providers can install a missing runner with `uv tool install` and then call
-`i-insist ensure`. It registers all three hooks for Codex/Claude installations
-found on `PATH` or through existing user configuration. Explicit disabled hooks
-cause a nonzero exit. It checks user settings, Codex per-hook disable state, and
-conservatively rejects disable flags in the current directory's ancestry.
-
-Registration is not proof of live execution: Codex hook trust, managed policy,
-command-line overrides, and a running session's snapshot remain harness-owned.
-Restart and review `/hooks` after installation. `ensure` never creates trust
-records or clears explicit disable settings. Providers must stop migration when
-it fails and keep existing guards until setup succeeds.
-
-## Human overrides
-
-Rules may set `overridable = false` (default: `true`). These rules still run
-after human approval, including shell environment overrides. The provider owns this setting; it is not a user customization. Invalid
-configuration still blocks approved calls.
-
-Include `i insist` anywhere in your message, in any capitalization:
-
-```text
-ok i insist, update both protected files
-```
-
-Matching is a case-insensitive substring check, including quoted text and code blocks.
-
-`UserPromptSubmit` records approval for the current response. Subsequent tool
-calls in that response bypass these rules, including direct file edits and custom
-tools. A new user message replaces the approval with that message's decision.
-Starting or resuming a session clears approval. Compaction preserves it. Codex
-also requires the same `turn_id`, so approval does not transfer to another turn.
-The agent remains responsible for respecting the scope you described.
-
-For a single shell tool invocation, the agent may use this explicit prefix only
-after human authorization:
-
-```sh
-HUMAN_PERMISSION_GRANTED=1 some-command
-```
-
-This skips checks for that shell **tool call**, including any chained commands in
-it. The approval doesn't persist to later calls. Only a leading assignment is
-recognized.
-Mentions in arguments or comments and inherited/exported environment variables
-do not grant approval. Approval never overrides another plugin or the harness's
-own permission policy.
-
-The approval cache stores a boolean and optional turn ID, not your prompt text,
-under `$XDG_CACHE_HOME/i-insist/approvals/` (default `~/.cache/i-insist/approvals/`).
-Cache keys separate harnesses and sessions. Missing or corrupt records do not
-grant approval. No approval IDs, synthetic tool calls, or transcript parsing are
-used. See [the approval decision](docs/decisions/001-approval.md).
-
-## Other harnesses
-
-Send a normalized event to:
-
-```sh
-i-insist check < event.json
-```
-
-The result is `{"blocked": false, "message": null}` or
-`{"blocked": true, "message": "your configured message"}`. Both normal decisions
-exit 0. Input, configuration, or checker failures return `blocked: true` and exit 2.
-The caller must honor both the decision and execution failures. This endpoint
-recognizes the shell marker but does not read Codex/Claude approval state.
-
-An adapter owns native tool normalization, message approval, and converting the
-decision into its harness's blocking response. Checkers need no changes when
-another harness provides the same neutral event.
-
-Hook coverage depends on the harness. For example, Codex does not issue a fresh
-`PreToolUse` for `write_stdin` or hosted web tools. If the harness never calls a
-hook, this package cannot intercept that action. A missing CLI or a harness-level
-hook timeout can also prevent the runner from issuing a denial. Keep providers
-fast enough to fit the enclosing hook timeout (600 seconds in generated registrations).
-This is a cooperative agent guard, not a sandbox: registered checkers themselves
-execute code with your account's privileges.
-
-Public hook references: [Codex](https://learn.chatgpt.com/docs/hooks) and
-[Claude Code](https://code.claude.com/docs/en/hooks).
-
-## Develop
-
-Beartype instruments package imports with runtime type checks. Development checks
-run through prek and uv. Install hooks once per checkout with
-`uv run prek install`.
-
-Create an isolated checkout with one command:
-
-```sh
-new-feature <name> --no-agent && uv sync --locked --directory ".worktrees/<name>"
-```
-
-```sh
-uv sync --locked
-uv run prek run --all-files
-uv run pytest
-uv run ruff check .
-uv run ruff format --check .
-uv build
-```
-
-Tests exercise installed hook commands and actual checker subprocesses using
-temporary homes, projects, and approval caches. They do not enable hooks in your
-active harness.
-
-## Publishing
-
-`.github/workflows/publish.yml` runs tests, lint, formatting, and a package build
-on pull requests. Each successful push to `main` publishes a release to PyPI
-and creates a GitHub release with the wheel and source distribution attached.
-Manual workflow dispatch retries a release without needing another commit.
-
-The workflow preserves an unpublished version from `pyproject.toml`. Otherwise,
-it increments the latest stable PyPI patch version. Use `uv version --bump minor`
-or `uv version --bump major` for an intentional version change. The release
-commit updates `pyproject.toml` and `uv.lock` together. Superseded runs are
-skipped, and retries reuse their release commit and already uploaded files.
-
-Publishing uses [PyPI Trusted Publishing](https://docs.pypi.org/trusted-publishers/)
-and the GitHub environment `pypi`, restricted to `main`. No PyPI API token is
-stored in GitHub. To configure a first publication, add a pending publisher at
-[PyPI account publishing](https://pypi.org/manage/account/publishing/) with:
-
-- Project: `i-insist`
-- GitHub owner: `crypdick`
-- Repository: `i-insist`
-- Workflow filename: `publish.yml`
-- Environment: `pypi`
-
-After the first release, install from PyPI with `uv tool install i-insist`.
+- [Integration reference](docs/reference.md): checker protocol, rule discovery, approval details, and upgrades from 0.3.x
+- [Development and releases](docs/development.md): contributing, checks, and publishing
