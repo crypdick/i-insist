@@ -8,6 +8,11 @@ from pathlib import Path
 
 from i_insist.events import Event  # noqa: TC001  # Beartype resolves annotation at runtime.
 
+DENIAL_MESSAGE = (
+    "Editing i-insist configuration requires human approval. Show the intended rule change "
+    "and ask the human to say I insist. Do not modify rules to evade a block."
+)
+
 
 def should_block(event: Event) -> bool:
     if any(".i-insist" in path.parts for path in event.paths):

@@ -13,8 +13,8 @@ from tests.support import allowed, denial, hook_path, invoke, manage_hooks, rule
 
 
 @pytest.mark.parametrize("harness", ["codex", "claude"])
-def test_checker_blocks_with_exact_custom_message(workspace: Path, harness: str):
-    rule(workspace, "print('true')")
+def test_checker_blocks_with_exact_checker_message(workspace: Path, harness: str):
+    rule(workspace, 'import json; print(json.dumps("Blocked by guard"))')
     assert denial(invoke(workspace, tool(workspace, command="git status"), harness=harness)) == (
         "Blocked by guard"
     )
@@ -24,22 +24,21 @@ def test_no_rules_allows_arbitrary_tools(workspace: Path):
     allowed(invoke(workspace, tool(workspace, "mcp__calendar__create", title="Lunch")))
 
 
-def test_false_and_disabled_checkers_allow(workspace: Path):
-    rule(workspace, "print('false')", name="allow")
-    rule(workspace, "raise RuntimeError('must not run')", extra="enabled = false\n")
+def test_null_checker_allows(workspace: Path):
+    rule(workspace, "print('null')")
     allowed(invoke(workspace, tool(workspace, command="git status")))
 
 
 def test_global_ancestor_and_local_rules_accumulate_once(workspace: Path):
     calls = workspace / "calls"
     script = (
-        f"from pathlib import Path\nwith Path({str(calls)!r}).open('a') as f: f.write('x')\nprint('false')"
+        f"from pathlib import Path\nwith Path({str(calls)!r}).open('a') as f: f.write('x')\nprint('null')"
     )
     rule(workspace.parent, script, name="global")
     rule(workspace, script, name="repo")
     nested = workspace / "src"
     nested.mkdir()
-    rule(nested, "print('true')", name="nested")
+    rule(nested, "import json; print(json.dumps('Blocked by nested'))", name="nested")
     assert denial(invoke(workspace, tool(nested, command="pwd"))) == "Blocked by nested"
     assert calls.read_text() == "xx"
 
@@ -63,7 +62,7 @@ assert event['harness'] == 'codex'
 assert event['tool_name'] == 'Bash'
 assert event['tool_input']['command'] == 'git status'
 assert event['cwd'].endswith('/repo/src')
-print('true')
+import json; print(json.dumps('Blocked by guard'))
 """,
     )
     nested = workspace / "src"
@@ -103,7 +102,7 @@ event = json.load(sys.stdin)
 assert event['kind'] == {kind!r}
 assert event['paths'] == {expected_paths!r}
 assert event['tool_input'] == {arguments!r}
-print('true')
+import json; print(json.dumps('Blocked by guard'))
 """,
     )
     assert denial(invoke(workspace, tool(workspace, name, **arguments))) == "Blocked by guard"
@@ -112,16 +111,16 @@ print('true')
 def test_target_directory_rules_apply_to_edits_from_outside(workspace: Path):
     protected = workspace / "protected"
     protected.mkdir()
-    rule(protected, "print('true')")
+    rule(protected, "import json; print(json.dumps('Blocked by guard'))")
     assert denial(invoke(workspace, tool(workspace, "Write", file_path="protected/a.txt"))) == (
         "Blocked by guard"
     )
 
 
-@pytest.mark.parametrize("output", ["1", "null", "{}", "true\nfalse", "not json"])
+@pytest.mark.parametrize("output", ["1", "true", "false", "{}", '""', '"  "', "null\nnull", "not json"])
 def test_invalid_checker_results_block(workspace: Path, output: str):
     rule(workspace, f"print({output!r})")
-    assert "checker must print a JSON boolean" in denial(invoke(workspace, tool(workspace)))
+    assert "checker must print JSON null or a nonempty string" in denial(invoke(workspace, tool(workspace)))
 
 
 @pytest.mark.parametrize("script", ["raise RuntimeError('broken')", "import time; time.sleep(2)"])
@@ -132,12 +131,12 @@ def test_checker_crash_or_timeout_blocks(workspace: Path, script: str):
 
 @pytest.mark.parametrize("extra", ["enabled = 'false'", "timeout = -1", "unknown = true"])
 def test_bad_rule_config_blocks(workspace: Path, extra: str):
-    rule(workspace, "print('false')", extra=extra)
+    rule(workspace, "print('null')", extra=extra)
     assert "configuration" in denial(invoke(workspace, tool(workspace)))
 
 
 def test_missing_checker_blocks(workspace: Path):
-    config = rule(workspace, "print('false')")
+    config = rule(workspace, "print('null')")
     (workspace / "guard.py").unlink()
     assert "checker" in denial(invoke(workspace, tool(workspace)))
     config.write_text("not valid = TOML !")
@@ -145,7 +144,7 @@ def test_missing_checker_blocks(workspace: Path):
 
 
 def test_prompt_approval_allows_multiple_edits_then_resets(workspace: Path):
-    rule(workspace, "print('true')")
+    rule(workspace, 'import json; print(json.dumps("Blocked by guard"))')
     payload = tool(workspace, "Write", file_path="a.txt")
     allowed(invoke(workspace, {**payload, "prompt": "I insist.\nEdit both files."}, "user-prompt-submit"))
     allowed(invoke(workspace, payload))
@@ -158,20 +157,26 @@ def test_prompt_approval_allows_multiple_edits_then_resets(workspace: Path):
 @pytest.mark.parametrize("approval", ["prompt", "shell"])
 def test_non_overridable_rules_still_run(workspace: Path, harness: str, approval: str):
     rule(workspace, "raise RuntimeError('approved rule must not run')", name="a-ordinary")
-    rule(workspace, "print('true')", name="protected", extra="overridable = false\n")
+    rule(
+        workspace,
+        "import json; print(json.dumps('Blocked by protected'))",
+        name="protected",
+        extra="overridable = false\n",
+    )
     payload = tool(workspace, command="HUMAN_PERMISSION_GRANTED=1 true" if approval == "shell" else "true")
     if approval == "prompt":
         allowed(invoke(workspace, {**payload, "prompt": "I insist"}, "user-prompt-submit", harness=harness))
     assert denial(invoke(workspace, payload, harness=harness)) == "Blocked by protected"
 
 
-def test_disabled_non_overridable_rule_does_not_run(workspace: Path):
-    rule(workspace, "raise RuntimeError('disabled')", extra="enabled = false\noverridable = false\n")
-    allowed(invoke(workspace, tool(workspace)))
+@pytest.mark.parametrize("extra", ["enabled = false", 'message = "Custom"'])
+def test_user_customization_fields_are_rejected(workspace: Path, extra: str):
+    rule(workspace, "print('null')", extra=extra)
+    assert "unknown rule fields" in denial(invoke(workspace, tool(workspace)))
 
 
 def test_overridable_requires_boolean(workspace: Path):
-    rule(workspace, "print('false')", extra="overridable = 'false'\n")
+    rule(workspace, "print('null')", extra="overridable = 'false'\n")
     assert "overridable must be a boolean" in denial(invoke(workspace, tool(workspace)))
 
 
@@ -189,14 +194,14 @@ def test_overridable_requires_boolean(workspace: Path):
 )
 @pytest.mark.parametrize("harness", ["codex", "claude"])
 def test_phrase_anywhere_in_human_prompt_grants_approval(workspace: Path, prompt: str, harness: str):
-    rule(workspace, "print('true')")
+    rule(workspace, 'import json; print(json.dumps("Blocked by guard"))')
     payload = tool(workspace, "Write", file_path="a.txt")
     allowed(invoke(workspace, {**payload, "prompt": prompt}, "user-prompt-submit", harness=harness))
     allowed(invoke(workspace, payload, harness=harness))
 
 
 def test_approval_does_not_cross_sessions_turns_or_harnesses(workspace: Path):
-    rule(workspace, "print('true')")
+    rule(workspace, 'import json; print(json.dumps("Blocked by guard"))')
     payload = tool(workspace, "Write", file_path="a.txt")
     allowed(invoke(workspace, {**payload, "prompt": "i insist!"}, "user-prompt-submit"))
     for changed in ({"session_id": "other"}, {"turn_id": "turn-2"}):
@@ -205,7 +210,7 @@ def test_approval_does_not_cross_sessions_turns_or_harnesses(workspace: Path):
 
 
 def test_claude_approval_without_turn_id(workspace: Path):
-    rule(workspace, "print('true')")
+    rule(workspace, 'import json; print(json.dumps("Blocked by guard"))')
     payload = tool(workspace, "Write", file_path="a.txt")
     del payload["turn_id"]
     allowed(invoke(workspace, {**payload, "prompt": "I insist"}, "user-prompt-submit", harness="claude"))
@@ -221,7 +226,7 @@ def test_claude_approval_without_turn_id(workspace: Path):
 
 
 def test_inline_marker_only_applies_to_that_shell_invocation(workspace: Path, monkeypatch):
-    rule(workspace, "print('true')")
+    rule(workspace, 'import json; print(json.dumps("Blocked by guard"))')
     allowed(invoke(workspace, tool(workspace, command="HUMAN_PERMISSION_GRANTED=1 git status")))
     assert denial(invoke(workspace, tool(workspace, command="git status"))) == "Blocked by guard"
     for command in (
@@ -240,7 +245,7 @@ def test_malformed_hook_input_blocks(workspace: Path):
 
 
 def test_neutral_check_protocol(workspace: Path):
-    rule(workspace, "print('true')")
+    rule(workspace, 'import json; print(json.dumps("Blocked by guard"))')
     event = {
         "kind": "other",
         "command": None,
@@ -263,13 +268,13 @@ def test_neutral_check_protocol(workspace: Path):
 
 
 def test_unknown_tool_arguments_are_not_interpreted_as_shell_metadata(workspace: Path):
-    rule(workspace, "print('true')")
+    rule(workspace, 'import json; print(json.dumps("Blocked by guard"))')
     payload = tool(workspace, "mcp__custom__action", cwd=42, workdir=["unrelated"])
     assert denial(invoke(workspace, payload)) == "Blocked by guard"
 
 
 def test_null_shell_workdir_uses_hook_cwd(workspace: Path):
-    rule(workspace, "print('true')")
+    rule(workspace, 'import json; print(json.dumps("Blocked by guard"))')
     assert denial(invoke(workspace, tool(workspace, workdir=None))) == "Blocked by guard"
 
 
@@ -287,7 +292,7 @@ def test_installed_hooks_block_approve_and_reset(workspace: Path, harness: str):
     result = manage_hooks("install", harness, workspace)
     assert result.returncode == 0, result.stderr
     hooks = json.loads(hook_path(workspace, harness).read_text())["hooks"]
-    rule(workspace, "print('true')")
+    rule(workspace, 'import json; print(json.dumps("Blocked by guard"))')
     payload = tool(workspace, "Edit", file_path="note.md", new_string="replacement")
     if harness == "claude":
         del payload["turn_id"]
@@ -330,17 +335,27 @@ def test_example_provider_with_real_files(workspace: Path):
 
 def test_nonfinite_json_is_rejected_before_checker_starts(workspace: Path):
     marker = workspace / "started"
-    rule(workspace, f"from pathlib import Path\nPath({str(marker)!r}).touch()\nprint('false')")
+    rule(workspace, f"from pathlib import Path\nPath({str(marker)!r}).touch()\nprint('null')")
     result = invoke(workspace, tool(workspace, "mcp__custom__action", value=float("nan")))
     assert "input" in denial(result)
     assert not marker.exists()
 
 
 def test_corrupt_approval_does_not_grant_permission(workspace: Path):
-    rule(workspace, "print('true')")
+    rule(workspace, 'import json; print(json.dumps("Blocked by guard"))')
     payload = tool(workspace, "Write", file_path="a.txt")
     allowed(invoke(workspace, {**payload, "prompt": "I insist"}, "user-prompt-submit"))
     cache = Path(os.environ["XDG_CACHE_HOME"]) / "i-insist/approvals"
     for path in cache.glob("*.json"):
         path.write_text("broken")
     assert denial(invoke(workspace, payload)) == "Blocked by guard"
+
+
+def test_checker_exception_is_reported_without_losing_final_line(workspace: Path):
+    rule(
+        workspace, "import sys; print('x' * 1500, file=sys.stderr); raise RuntimeError('policy unavailable')"
+    )
+    message = denial(invoke(workspace, tool(workspace)))
+    assert "exited 1" in message
+    assert "Traceback" in message
+    assert "RuntimeError: policy unavailable" in message

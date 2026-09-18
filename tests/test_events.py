@@ -48,7 +48,7 @@ def test_checker_receives_neutral_file_changes(workspace, name, arguments, chang
     ]
     rule(
         workspace,
-        f"import json, sys\nassert json.load(sys.stdin)['changes'] == {expected!r}\nprint('false')",
+        f"import json, sys\nassert json.load(sys.stdin)['changes'] == {expected!r}\nprint('null')",
     )
     allowed(invoke(workspace, tool(workspace, name, **arguments)))
 
@@ -58,7 +58,7 @@ def test_custom_harness_changes_reach_checker_and_target_rules(workspace):
     target.mkdir()
     rule(
         target,
-        "import json, sys\nprint(json.dumps(json.load(sys.stdin)['changes'][0]['content'] == 'blocked'))",
+        "import json, sys\nprint(json.dumps('Blocked by guard' if json.load(sys.stdin)['changes'][0]['content'] == 'blocked' else None))",
     )
     event = {
         "kind": "file_write",

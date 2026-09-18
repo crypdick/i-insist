@@ -213,7 +213,7 @@ def test_config_protection_example_matches_installed_rule(workspace: Path):
 
 
 def test_neutral_check_keeps_non_overridable_rules(workspace: Path):
-    rule(workspace, "print('true')", extra="overridable = false\n")
+    rule(workspace, "import json; print(json.dumps('Blocked by guard'))", extra="overridable = false\n")
     event = {
         "kind": "shell",
         "command": "HUMAN_PERMISSION_GRANTED=1 true",
@@ -232,3 +232,18 @@ def test_neutral_check_keeps_non_overridable_rules(workspace: Path):
     )
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == {"blocked": True, "message": "Blocked by guard"}
+
+
+def test_reinstall_regenerates_owned_rule_and_preserves_other_providers(workspace):
+    path = workspace.parent / ".i-insist/i-insist.toml"
+    path.parent.mkdir()
+    path.write_text('[[rules]]\nid = "protect-config"\nenabled = false\nmessage = "Custom"\n')
+    other = path.with_name("provider.toml")
+    other.write_text("# unrelated provider\n")
+    result = manage_hooks("install", "codex", workspace)
+    assert result.returncode == 0, result.stderr
+    import tomllib
+
+    rules = tomllib.loads(path.read_text())["rules"]
+    assert rules == [{"id": "protect-config", "checker": ["i-insist", "protect-config"]}]
+    assert other.read_text() == "# unrelated provider\n"

@@ -3,8 +3,8 @@
 Block agent tool calls using your own checks. Say `I insist` to override them.
 
 Rules live in `~/.i-insist/*.toml` globally and `.i-insist/*.toml` within a
-directory or repository. Each rule runs a program you own and displays your
-message when that program returns `true`. Codex and Claude Code integrations use
+directory or repository. Each rule runs a provider-owned checker and displays the denial message
+returned by that checker. Codex and Claude Code integrations use
 public lifecycle hooks. Other harnesses can use the neutral JSON interface.
 
 ## Install
@@ -74,16 +74,16 @@ my-project/
 [[rules]]
 id = "my-plugin/protected-folders"
 checker = ["python3", "../tools/protect_folders.py"]
-message = "These originals require your permission to edit."
-# enabled = false
 # timeout = 10
 ```
 
-`enabled` defaults to `true`. A disabled rule's checker does not run.
+Registrations are generated and owned by their provider. There are no user
+customization fields: setup replaces the provider's registration with its current
+template. Messages live in the checker, and `enabled` is not supported.
 `timeout` is the checker's time limit in seconds. It defaults to 10 and must be
 positive. Each TOML file can contain multiple `[[rules]]`. IDs must be unique within
 their file. Invalid configuration blocks execution rather than silently omitting
-a check, including invalid fields on disabled rules.
+a check. Legacy `message` and `enabled` fields are rejected.
 
 Checker locations are unrestricted. `.i-insist/scripts/` is an optional
 convention, not a requirement. The checker is an argument list executed directly,
@@ -101,9 +101,8 @@ Rule discovery checks these locations:
 Rule discovery resolves and deduplicates directories. Each directory's TOML files
 run in filename order, with rules in declaration order. Discovery doesn't recursively
 scan `.i-insist/` subdirectories. Paths use their physical, symlink-resolved
-locations. Global and local rules accumulate. A local disabled rule doesn't
-turn off a global rule with the same ID. The first matching rule supplies the
-block message, unchanged.
+locations. Global and local rules accumulate. The first checker to return a denial supplies
+the block message, unchanged.
 
 Shell text is opaque to discovery: `cd`, `git -C`, shell write targets, and paths
 inside custom tool arguments are not inferred. Put such policies at a scope the
@@ -111,10 +110,16 @@ invocation reaches, or resolve their targets in your provider's checker.
 
 ## Write a checker
 
-Read one JSON object on stdin. Print exactly one JSON boolean on stdout and exit
-with status 0. `true` blocks, and `false` allows the next check. Write any debugging
-output to stderr. Checker crashes, invalid output, missing executables, and
-timeouts block with an error. On POSIX, timeout cleanup kills the checker process
+Read one JSON object on stdin. Print exactly one JSON value on stdout and exit
+with status 0: `null` allows the next check; a nonempty string blocks and is shown
+unchanged as the denial message. Booleans, empty or whitespace-only strings, other
+JSON values, and extra output are protocol errors. Write debugging output to stderr.
+
+Let policy evaluation errors fail the checker. Do not catch an error and return
+`null`: that falsely reports permission to proceed. Checkers run as subprocesses;
+i-insist detects a nonzero exit and reports the exit status and complete stderr,
+including any exception traceback. Missing executables, invalid output, and
+timeouts also block with an error. On POSIX, timeout cleanup kills the checker process
 group, including its children unless they detach into another session.
 
 ```python
@@ -127,7 +132,8 @@ def should_block(event: dict) -> bool:
     return any("_sources" in Path(path).parts for path in event["paths"])
 
 
-print(json.dumps(should_block(json.load(sys.stdin))))
+message = "These originals require your permission to edit. Ask the human to say I insist."
+print(json.dumps(message if should_block(json.load(sys.stdin)) else None))
 ```
 
 This example protects **direct file edits**. It does not parse shell writes.
@@ -182,18 +188,31 @@ Custom harnesses can pass `changes` to `i-insist check`; their paths participate
 in rule discovery even when omitted from `paths`. Existing callers can omit
 `changes`, but checkers requiring file content may reject those events.
 
-Providers own their TOML, checker programs, and dependencies. Installers should
-update only their own files, preserve user changes such as `enabled = false`,
-and remove their registrations on uninstall. Existing plugin-specific policy
+Providers own their TOML, checker programs, messages, and dependencies. Installers
+replace only their own registrations atomically from the current template, including
+removing obsolete rules. They leave other providers' files alone and remove their
+own registrations on uninstall. Installed registrations are not a customization
+interface; human approval remains the supported way to override overridable rules. Existing plugin-specific policy
 configuration can remain in place. The provider's checker reads it.
+
+## Upgrade from 0.3.x
+
+Version 0.4.0 changes the checker protocol and registration schema. Upgrade each
+provider to emit a denial string or `null`, then regenerate its registrations:
+remove `message` and `enabled`, and move denial text into checker code. Old
+registrations and boolean checkers fail closed; there is no compatibility fallback.
+Providers must require i-insist 0.4.0 or later before replacing their registrations.
+
+Coordinate runner and provider upgrades, then restart the harness. The runner
+cannot regenerate another provider's files: that provider's setup owns migration.
+See [the ownership decision](docs/decisions/003-checker-owned-policy.md).
 
 ## Protecting configuration
 
 `i-insist install` installs `~/.i-insist/i-insist.toml`. Its checker blocks
 explicit file edits under `.i-insist` and common shell mutations that name those
-directories. Human approval is required for changes, including disabling this
-rule. The same rule ships in [examples/config-protection.toml](examples/config-protection.toml).
-Existing configuration is preserved on repeated installation.
+directories. Human approval is required for registration changes. The same rule ships in [examples/config-protection.toml](examples/config-protection.toml).
+Repeated installation regenerates this provider-owned registration.
 
 The shell check recognizes common file commands, redirections, in-place `sed`,
 and interpreter commands naming `.i-insist`. Opaque scripts, dynamically
@@ -217,8 +236,8 @@ it fails and keep existing guards until setup succeeds.
 ## Human overrides
 
 Rules may set `overridable = false` (default: `true`). These rules still run
-after human approval, including shell environment overrides. `enabled = false`
-still disables a rule. Invalid configuration still blocks approved calls.
+after human approval, including shell environment overrides. The provider owns this setting; it is not a user customization. Invalid
+configuration still blocks approved calls.
 
 Include `i insist` anywhere in your message, in any capitalization:
 
