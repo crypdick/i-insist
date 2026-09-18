@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import re
 import shlex
 from pathlib import Path
@@ -13,6 +14,56 @@ DENIAL_MESSAGE = (
     "and ask the human to say I insist. Do not modify rules to evade a block."
 )
 
+PYTHON = r"(?:\S*/)?python(?:3(?:\.\d+)?)?"
+
+
+def python_config_reference(source: str) -> str:
+    """Inspect literal paths without treating replacement source text as paths."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return source
+    # Keep the conservative check when strings can become executable code.
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            name = getattr(node.func, "id", getattr(node.func, "attr", ""))
+            if name in {
+                "exec",
+                "eval",
+                "compile",
+                "system",
+                "popen",
+                "Popen",
+                "run",
+                "call",
+                "check_call",
+                "check_output",
+            }:
+                return source
+    # NOTE: README.md documents this cooperative, literal-path check. Arbitrary
+    # Python data flow and opaque programs still require an OS sandbox.
+    return (
+        ".i-insist"
+        if any(
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and ".i-insist" in Path(node.value).parts
+            for node in ast.walk(tree)
+        )
+        else ""
+    )
+
+
+def normalize_python_heredocs(command: str) -> str:
+    """Quote recognized literal Python heredocs before shell tokenization."""
+    return re.sub(
+        rf"(?m)^(?P<python>{PYTHON})[ \t]+(?:-[ \t]+)?"
+        r"<<[ \t]*(?P<quote>['\"])(?P<delimiter>\w+)(?P=quote)[ \t]*\n"
+        r"(?P<source>[\s\S]*?)\n(?P=delimiter)(?=\n|$)",
+        lambda match: f"{match['python']} -c {shlex.quote(match['source'])}",
+        command,
+    )
+
 
 def should_block(event: Event) -> bool:
     if any(".i-insist" in path.parts for path in event.paths):
@@ -21,13 +72,16 @@ def should_block(event: Event) -> bool:
         return False
     # NOTE: Opaque programs can hide writes. This covers explicit paths and
     # common shell mutations; an OS sandbox is required for hostile agents.
-    command = event.command
+    command = normalize_python_heredocs(event.command)
     lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|<>")
     lexer.whitespace_split = True
     try:
         words = list(lexer)
     except ValueError:
         return ".i-insist" in command
+    for index in range(2, len(words)):
+        if words[index - 1] == "-c" and re.fullmatch(PYTHON, words[index - 2]):
+            words[index] = python_config_reference(words[index])
     touches = ".i-insist" in event.cwd.parts or any(".i-insist" in word for word in words)
     if not touches:
         touches = any(

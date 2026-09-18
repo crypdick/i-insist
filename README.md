@@ -49,6 +49,13 @@ permissions.
 These are cooperative guards, not a sandbox. They depend on the agent calling
 hooks, and checkers run with your account's privileges.
 
+Configuration protection recognizes literal paths in Python `-c` commands and
+standalone quoted Python heredocs. Embedded replacement source text mentioning
+`.i-insist` is not itself a configuration path. Literal configuration paths
+(including f-string fragments) still require approval. Malformed Python,
+recognized dynamic execution calls, and other shell forms retain conservative
+checks. This is not arbitrary Python data-flow analysis or a shell sandbox.
+
 ## Update or uninstall
 
 Update the runner, then repeat the install command for each integration you use
