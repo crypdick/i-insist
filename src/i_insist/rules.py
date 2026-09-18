@@ -24,7 +24,7 @@ class Rule:
 
 
 def config_files(event: Event) -> list[Path]:
-    # NOTE: README documents additive ancestry, including explicit file targets.
+    # NOTE: docs/reference.md documents additive ancestry, including explicit file targets.
     directories = [Path.home() / ".i-insist"]
     for location in (event.cwd, *(path.parent for path in event.paths)):
         directories.extend(parent / ".i-insist" for parent in reversed(location.parents))

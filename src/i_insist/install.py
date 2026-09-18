@@ -156,7 +156,7 @@ def configure(harness: str, *, install: bool) -> Path:
 def install_config_protection() -> None:
     destination = Path.home() / ".i-insist" / "i-insist.toml"
     destination.parent.mkdir(parents=True, exist_ok=True)
-    # NOTE: README's Protecting configuration describes provider-owned replacement.
+    # NOTE: docs/reference.md's Protecting configuration describes provider-owned replacement.
     source = files("i_insist").joinpath("config-protection.toml").read_text()
     destination = destination.resolve()
     temporary = None
@@ -214,7 +214,7 @@ def check_enabled(document: dict[str, Json], harness: str, path: Path) -> None:
 
 
 def check_project_settings(harness: str) -> None:
-    # NOTE: README describes this conservative check of current ancestry.
+    # NOTE: docs/reference.md describes this conservative check of current ancestry.
     for parent in (*Path.cwd().parents, Path.cwd()):
         names = (
             (".codex/config.toml",)
