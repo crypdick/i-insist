@@ -58,7 +58,8 @@ def run_hook(data: dict[str, Json], harness: str, event_name: str) -> None:
                             "for that response, except rules marked overridable = false. "
                             "For an explicitly authorized shell invocation, "
                             "you may prefix HUMAN_PERMISSION_GRANTED=1; never export it or "
-                            "set it to authorize yourself. Do not rewrite rules to evade a block."
+                            "set it to authorize yourself. Do not unilaterally rewrite rules "
+                            "to evade a block unless a human expressly insists that you do so."
                         ),
                     }
                 }
