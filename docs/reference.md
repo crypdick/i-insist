@@ -174,7 +174,12 @@ directories. Registration changes require human approval. The same rule ships in
 Repeated installation regenerates this provider-owned registration.
 
 The shell check recognizes common file commands, redirections, in-place `sed`,
-and interpreter commands naming `.i-insist`. Opaque scripts, dynamically
+and interpreter commands naming `.i-insist`. For simple shell lists and pipelines,
+each command is checked separately, so a config read does not make an unrelated
+test invocation require approval. Quoting, escaping, and redirection operators
+are preserved. Directory changes, variable assignments, shell control flow,
+nested substitutions, and unnormalized heredocs keep the conservative whole-call
+check. Opaque scripts, dynamically
 constructed paths, and commands that change directories internally can evade
 it. This remains a cooperative guard, not a filesystem sandbox.
 
