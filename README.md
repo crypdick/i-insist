@@ -56,6 +56,12 @@ standalone quoted Python heredocs. Embedded replacement source text mentioning
 recognized dynamic execution calls, and other shell forms retain conservative
 checks. This is not arbitrary Python data-flow analysis or a shell sandbox.
 
+Separate shell commands are checked independently: listing `.i-insist` followed
+by an unrelated test or file operation does not require approval. Quoted and
+escaped separators stay within their command, as do redirection operators.
+Directory changes, variable assignments, shell control flow, substitutions,
+and other heredocs retain the conservative whole-call check.
+
 ## Update or uninstall
 
 Update the runner, then repeat the install command for each integration you use

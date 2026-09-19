@@ -70,9 +70,44 @@ def should_block(event: Event) -> bool:
         return True
     if event.kind != "shell" or not event.command:
         return False
+    command = normalize_python_heredocs(event.command)
+    return any(shell_command_blocks(part, event.cwd) for part in shell_commands(command))
+
+
+def shell_commands(command: str) -> list[str]:
+    """Separate simple commands without splitting quoted or escaped separators."""
+    # Shared shell state, nested execution, and heredocs retain the whole-call check.
+    if any(marker in command for marker in ("$(", "`", "<<", "<(", ">(")):
+        return [command]
+    try:
+        words = shlex.split(command, comments=True)
+    except ValueError:
+        return [command]
+    if any(
+        word in {"cd", "pushd", "popd", "for", "while", "until", "if", "case", "eval", "source", "."}
+        or re.match(r"[a-zA-Z_][a-zA-Z_0-9]*=", word)
+        for word in words
+    ):
+        return [command]
+    parts = []
+    start = 0
+    tokens = (
+        r"""'[^']*'|"(?:\\[\s\S]|[^"\\])*"|\\[\s\S]|\#[^\n]*"""
+        r"|(?P<group>[(){}])|(?P<boundary>[;\n]+|(?<![<>])[&|](?![<>]))"
+    )
+    for match in re.finditer(tokens, command):
+        if match.lastgroup == "group":
+            return [command]
+        if match.lastgroup == "boundary":
+            parts.append(command[start : match.start()])
+            start = match.end()
+    parts.append(command[start:])
+    return parts
+
+
+def shell_command_blocks(command: str, cwd: Path) -> bool:
     # NOTE: Opaque programs can hide writes. This covers explicit paths and
     # common shell mutations; an OS sandbox is required for hostile agents.
-    command = normalize_python_heredocs(event.command)
     lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|<>")
     lexer.whitespace_split = True
     try:
@@ -82,10 +117,10 @@ def should_block(event: Event) -> bool:
     for index in range(2, len(words)):
         if words[index - 1] == "-c" and re.fullmatch(PYTHON, words[index - 2]):
             words[index] = python_config_reference(words[index])
-    touches = ".i-insist" in event.cwd.parts or any(".i-insist" in word for word in words)
+    touches = ".i-insist" in cwd.parts or any(".i-insist" in word for word in words)
     if not touches:
         touches = any(
-            ".i-insist" in (event.cwd / Path(word).expanduser()).resolve().parts
+            ".i-insist" in (cwd / Path(word).expanduser()).resolve().parts
             for word in words
             if word and "\n" not in word
         )
@@ -113,7 +148,7 @@ def should_block(event: Event) -> bool:
     redirects_to_config = any(
         ">" in word
         and index + 1 < len(words)
-        and ".i-insist" in (event.cwd / Path(words[index + 1]).expanduser()).resolve().parts
+        and ".i-insist" in (cwd / Path(words[index + 1]).expanduser()).resolve().parts
         for index, word in enumerate(words)
     )
     return touches and (
