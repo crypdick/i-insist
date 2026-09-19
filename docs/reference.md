@@ -73,6 +73,16 @@ The runner shows that string unchanged as the denial message. Any other JSON
 value, an empty or whitespace-only string, or extra output is a protocol error.
 Write debugging output to stderr.
 
+Treat tool arguments according to the tool's schema, not their spelling. An
+absolute-looking string is not necessarily a filesystem path: collaboration tools
+such as `collaboration.send_message` use `target: "/root"` for an agent address.
+A checker that tried Git repository ownership lookup on that address blocked
+messages with `fatal: cannot change to '/root': Permission denied`.
+Use neutral `cwd` and `paths` for filesystem checks; when inspecting `tool_input`
+for additional paths, distinguish path fields from agent addresses and other
+identifiers. Excluding an address from path lookup must not skip other policy
+checks on the event.
+
 Let policy evaluation errors fail the checker. Don't catch an error and return
 `null`: that falsely reports permission to proceed. Checkers run as subprocesses.
 The runner detects a nonzero exit and reports the exit status and complete stderr,
