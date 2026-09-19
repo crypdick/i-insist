@@ -285,6 +285,9 @@ def test_session_start_supplies_override_instructions(workspace: Path):
     assert "I insist" in context
     assert "HUMAN_PERMISSION_GRANTED=1" in context
     assert "human" in context
+    assert (
+        "Do not unilaterally rewrite rules to evade a block unless a human expressly insists that you do so."
+    ) in context
 
 
 @pytest.mark.parametrize("harness", ["codex", "claude"])
