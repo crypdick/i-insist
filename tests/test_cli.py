@@ -278,16 +278,9 @@ def test_null_shell_workdir_uses_hook_cwd(workspace: Path):
     assert denial(invoke(workspace, tool(workspace, workdir=None))) == "Blocked by guard"
 
 
-def test_session_start_supplies_override_instructions(workspace: Path):
-    result = invoke(workspace, tool(workspace), "session-start")
-    assert result.returncode == 0, result.stderr
-    context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
-    assert "I insist" in context
-    assert "HUMAN_PERMISSION_GRANTED=1" in context
-    assert "human" in context
-    assert (
-        "Do not unilaterally rewrite rules to evade a block unless a human expressly insists that you do so."
-    ) in context
+@pytest.mark.parametrize("harness", ["codex", "claude"])
+def test_session_start_does_not_inject_context(workspace: Path, harness: str):
+    allowed(invoke(workspace, {**tool(workspace), "source": "startup"}, "session-start", harness=harness))
 
 
 @pytest.mark.parametrize("harness", ["codex", "claude"])

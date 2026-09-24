@@ -44,27 +44,6 @@ def run_hook(data: dict[str, Json], harness: str, event_name: str) -> None:
             raise GuardError("approval context is required for session start")
         if data.get("source") != "compact":
             approvals.reset()
-        print(
-            json.dumps(
-                {
-                    "hookSpecificOutput": {
-                        "hookEventName": "SessionStart",
-                        "additionalContext": (
-                            "i-insist checks tool calls using global and directory-local "
-                            ".i-insist/*.toml rules. "
-                            "When blocked, show the checker message and follow its guidance. "
-                            "Only the human can authorize an override. "
-                            "The phrase 'I insist' anywhere in their latest message (case-insensitive) permits calls "
-                            "for that response, except rules marked overridable = false. "
-                            "For an explicitly authorized shell invocation, "
-                            "you may prefix HUMAN_PERMISSION_GRANTED=1; never export it or "
-                            "set it to authorize yourself. Do not unilaterally rewrite rules "
-                            "to evade a block unless a human expressly insists that you do so."
-                        ),
-                    }
-                }
-            )
-        )
     else:
         event = normalize_hook(data, harness)
         approved = shell_approved(event) or bool(approvals and approvals.allows(turn))

@@ -3,6 +3,7 @@
 Block agent tool calls with checks from your plugins or your own scripts.
 Works with Codex and Claude Code. When a check blocks an action, the agent sees
 the reason and stops. Say `I insist` when you want to override it.
+Session startup adds no i-insist text to the agent's context.
 
 ## Install
 
