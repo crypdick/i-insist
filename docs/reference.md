@@ -10,6 +10,9 @@ The installer registers `PreToolUse`, `UserPromptSubmit`, and `SessionStart` in:
 - Codex: `~/.codex/hooks.json`, or `$CODEX_HOME/hooks.json`.
 - Claude Code: `~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR/settings.json`.
 
+`SessionStart` silently resets approval on startup and resume; compaction preserves it.
+Only a denied tool call sends a checker message to the agent.
+
 It preserves other settings, hooks, file permissions, and symlinks. Repeated runs
 don't create duplicate registrations. Writes are atomic, and concurrent installers
 coordinate through a lock file beside the configuration.
