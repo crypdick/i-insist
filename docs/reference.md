@@ -93,6 +93,22 @@ including any exception traceback. Missing executables, invalid output, and
 timeouts also block with an error. On POSIX, timeout cleanup kills the checker process
 group, including its children unless they detach into another session.
 
+On Linux and macOS, the runner resolves checker executables from the rule directory
+or `PATH`, including entrypoint symlinks. An executable in an environment with
+`uv-receipt.toml` uses uv's tools-directory `.lock`: the runner holds a shared lock
+from before process startup until the checker exits. uv tool installation takes
+an exclusive lock, so it cannot remove dependencies during a running check.
+Multiple checkers can run together. Waiting for installation consumes the same
+`timeout` budget as execution; lock errors and timeouts block execution. Checkers must not run uv tool installation
+while holding this lock.
+
+This protects directly invoked uv-installed executables, including a temporarily
+missing executable behind an entrypoint symlink. Shell wrappers and scripts launched
+through another interpreter are not inspected for a hidden tool environment.
+Keep the receipt and tools-directory lock in place. Replacing the whole environment,
+manual package changes, and upgrading the runner itself need idle agent sessions.
+The runner cannot lock its environment before its own Python imports run.
+
 This checker blocks direct edits to files under `_sources`:
 
 ```python

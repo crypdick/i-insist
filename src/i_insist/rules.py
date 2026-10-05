@@ -7,7 +7,10 @@ import math
 import os
 import signal
 import subprocess
+import time
 import tomllib
+from collections.abc import Iterator  # noqa: TC003 -- beartype resolves generator hints at import.
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -84,22 +87,64 @@ def load_rules(path: Path) -> list[Rule]:
         raise GuardError(f"configuration {path}: {exc}") from exc
 
 
+def uv_tool_lock(rule: Rule) -> Path | None:
+    """Find uv's installer lock through the executable, including broken symlinks."""
+    command = rule.checker[0]
+    directories = [""] if "/" in command else os.get_exec_path()
+    for directory in directories:
+        executable = rule.directory / directory / command
+        environment = executable.resolve().parent.parent
+        if (environment / "uv-receipt.toml").is_file():
+            return environment.parent / ".lock"
+        if os.access(executable, os.X_OK):
+            break
+    return None
+
+
+@contextmanager
+def checker_install_lock(rule: Rule, deadline: float) -> Iterator[None]:
+    # NOTE: docs/reference.md's Write a checker describes POSIX uv tool locking.
+    lock_path = uv_tool_lock(rule) if os.name == "posix" else None
+    if lock_path is None:
+        yield
+        return
+    import fcntl  # noqa: PLC0415 -- unavailable on non-POSIX platforms.
+
+    with lock_path.open("rb") as lock:
+        while True:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_SH | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise GuardError(
+                        f"checker {rule.id}: timed out waiting for uv tool installation"
+                    ) from None
+                time.sleep(min(0.05, remaining))
+        yield
+
+
 def run_checker(rule: Rule, event: Event) -> str | None:
+    deadline = time.monotonic() + rule.timeout
     try:
         payload = json.dumps(event.as_json(), allow_nan=False)
-        with subprocess.Popen(  # noqa: S603 -- provider checker argv is this tool's contract.
-            rule.checker,
-            cwd=rule.directory,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            start_new_session=os.name == "posix",
-        ) as process:
+        with (
+            checker_install_lock(rule, deadline),
+            subprocess.Popen(  # noqa: S603 -- provider checker argv is this tool's contract.
+                rule.checker,
+                cwd=rule.directory,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                start_new_session=os.name == "posix",
+            ) as process,
+        ):
             try:
                 stdout, stderr = process.communicate(
                     payload,
-                    timeout=rule.timeout,
+                    timeout=max(0, deadline - time.monotonic()),
                 )
             except subprocess.TimeoutExpired:
                 if os.name == "posix":

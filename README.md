@@ -71,6 +71,11 @@ if the update changes hook registrations:
 uv tool upgrade i-insist
 ```
 
+Checks launched from uv-installed executables coordinate with uv tool upgrades.
+They wait for an active installation, then run against the restored environment.
+The wait counts toward the checker timeout; an overdue installation still blocks
+the tool call. See [checker execution](docs/reference.md#write-a-checker) for scope.
+
 To uninstall, remove each integration you installed before removing the runner:
 
 ```sh
