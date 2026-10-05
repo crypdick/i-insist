@@ -24,6 +24,10 @@ def test_config_shell_command_boundaries(workspace, separator, write):
 @pytest.mark.parametrize(
     ("command", "blocked"),
     [
+        ("cat <<'LUA'\nassert(left ~= right)\nLUA", False),
+        ("printf '%s' '~=lua'", False),
+        ("printf ok > '~=output'", False),
+        ("printf ok > '~=output'; rm ~/.i-insist/policy.toml", True),
         ("python3 /tmp/test_guard.py\nls -l ~/.i-insist", False),
         ("ls ~/.i-insist\npython3 - <<'PY'\nprint('ok')\nPY\n", False),
         ("ls ~/.i-insist; python3 -c 'print(\"a;b\")'", False),
@@ -59,6 +63,14 @@ def test_config_shell_command_boundaries(workspace, separator, write):
 )
 def test_config_shell_quoting_and_writes(workspace, command, blocked):
     assert config_denied(workspace, command) is blocked
+
+
+@pytest.mark.parametrize("command", ["printf ok > '~=alias/policy.toml'", "touch '~=alias/policy.toml'"])
+def test_literal_tilde_alias_to_config_still_blocks(workspace, command):
+    protected = workspace / ".i-insist"
+    protected.mkdir()
+    (workspace / "~=alias").symlink_to(protected, target_is_directory=True)
+    assert config_denied(workspace, command)
 
 
 def config_denied(workspace, command):

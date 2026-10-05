@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import os
 import re
 import shlex
 from pathlib import Path
@@ -120,7 +121,7 @@ def shell_command_blocks(command: str, cwd: Path) -> bool:
     touches = ".i-insist" in cwd.parts or any(".i-insist" in word for word in words)
     if not touches:
         touches = any(
-            ".i-insist" in (cwd / Path(word).expanduser()).resolve().parts
+            ".i-insist" in (cwd / os.path.expanduser(word)).resolve().parts  # noqa: PTH111 - Unknown users stay literal.
             for word in words
             if word and "\n" not in word
         )
@@ -148,7 +149,7 @@ def shell_command_blocks(command: str, cwd: Path) -> bool:
     redirects_to_config = any(
         ">" in word
         and index + 1 < len(words)
-        and ".i-insist" in (cwd / Path(words[index + 1]).expanduser()).resolve().parts
+        and ".i-insist" in (cwd / os.path.expanduser(words[index + 1])).resolve().parts  # noqa: PTH111
         for index, word in enumerate(words)
     )
     return touches and (

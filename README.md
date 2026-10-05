@@ -61,6 +61,8 @@ by an unrelated test or file operation does not require approval. Quoted and
 escaped separators stay within their command, as do redirection operators.
 Directory changes, variable assignments, shell control flow, substitutions,
 and other heredocs retain the conservative whole-call check.
+Unknown `~user` names remain literal during path checks, so shell data such as
+Lua's `~=` operator does not cause a home-directory lookup error.
 
 ## Update or uninstall
 
