@@ -6,6 +6,7 @@ import ast
 import os
 import re
 import shlex
+from collections.abc import Sequence  # noqa: TC003  # Beartype resolves annotation at runtime.
 from pathlib import Path
 
 from i_insist.events import Event  # noqa: TC001  # Beartype resolves annotation at runtime.
@@ -16,6 +17,25 @@ DENIAL_MESSAGE = (
 )
 
 PYTHON = r"(?:\S*/)?python(?:3(?:\.\d+)?)?"
+OPAQUE_WORD = re.compile(r"[\s'\"`$*?\[\](){}\\]")
+MUTATORS = frozenset(
+    {
+        "rm",
+        "mv",
+        "cp",
+        "install",
+        "touch",
+        "mkdir",
+        "rmdir",
+        "tee",
+        "truncate",
+        "chmod",
+        "chown",
+        "ln",
+        "patch",
+    }
+)
+INTERPRETERS = frozenset({"python", "python3", "perl", "ruby", "node"})
 
 
 def python_config_reference(source: str) -> str:
@@ -66,13 +86,37 @@ def normalize_python_heredocs(command: str) -> str:
     )
 
 
-def should_block(event: Event) -> bool:
-    if any(".i-insist" in path.parts for path in event.paths):
-        return True
+def block_reason(event: Event) -> str | None:
+    """Name what matched, so a false positive can be rephrased instead of abandoned."""
+    for path in event.paths:
+        if ".i-insist" in path.parts:
+            return f"path {str(path)!r}"
     if event.kind != "shell" or not event.command:
-        return False
-    command = normalize_python_heredocs(event.command)
-    return any(shell_command_blocks(part, event.cwd) for part in shell_commands(command))
+        return None
+    # Every directory a literal `cd` may have reached stays suspect for later commands.
+    cwds = [event.cwd]
+    for part in shell_commands(normalize_python_heredocs(event.command)):
+        target = cd_target(part, cwds[-1])
+        if target is not None:
+            cwds.append(target)
+        if reason := shell_command_blocks(part, cwds):
+            return reason
+    return None
+
+
+def cd_target(command: str, cwd: Path) -> Path | None:
+    """Resolve a literal `cd`; computed targets keep the conservative word checks."""
+    try:
+        words = shlex.split(command, comments=True)
+    except ValueError:
+        return None
+    if not words or words[0] != "cd" or "-" in words:
+        return None
+    args = [word for word in words[1:] if not word.startswith("-")]
+    target = args[0] if args else "~"
+    if len(args) > 1 or "$" in target:
+        return None
+    return (cwd / os.path.expanduser(target)).resolve()  # noqa: PTH111 - Unknown users stay literal.
 
 
 def shell_commands(command: str) -> list[str]:
@@ -85,7 +129,7 @@ def shell_commands(command: str) -> list[str]:
     except ValueError:
         return [command]
     if any(
-        word in {"cd", "pushd", "popd", "for", "while", "until", "if", "case", "eval", "source", "."}
+        word in {"pushd", "popd", "for", "while", "until", "if", "case", "eval", "source", "."}
         or re.match(r"[a-zA-Z_][a-zA-Z_0-9]*=", word)
         for word in words
     ):
@@ -106,7 +150,26 @@ def shell_commands(command: str) -> list[str]:
     return parts
 
 
-def shell_command_blocks(command: str, cwd: Path) -> bool:
+def names_config(word: str) -> bool:
+    """Match `.i-insist` as a path component; free text and globs may hide a path."""
+    if ".i-insist" not in word:
+        return False
+    return OPAQUE_WORD.search(word) is not None or ".i-insist" in Path(word).parts
+
+
+def resolves_to_config(word: str, cwds: Sequence[Path]) -> bool:
+    return (
+        bool(word)
+        and "\n" not in word
+        and any(
+            ".i-insist" in (cwd / os.path.expanduser(word)).resolve().parts  # noqa: PTH111 - Unknown users stay literal.
+            for cwd in cwds
+        )
+    )
+
+
+def shell_command_blocks(command: str, cwds: Sequence[Path]) -> str | None:
+    """Return why one simple command edits protected configuration, if it does."""
     # NOTE: Opaque programs can hide writes. This covers explicit paths and
     # common shell mutations; an OS sandbox is required for hostile agents.
     lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|<>")
@@ -114,46 +177,37 @@ def shell_command_blocks(command: str, cwd: Path) -> bool:
     try:
         words = list(lexer)
     except ValueError:
-        return ".i-insist" in command
+        return "unparseable command mentioning '.i-insist'" if ".i-insist" in command else None
     for index in range(2, len(words)):
         if words[index - 1] == "-c" and re.fullmatch(PYTHON, words[index - 2]):
             words[index] = python_config_reference(words[index])
-    touches = ".i-insist" in cwd.parts or any(".i-insist" in word for word in words)
-    if not touches:
-        touches = any(
-            ".i-insist" in (cwd / os.path.expanduser(word)).resolve().parts  # noqa: PTH111 - Unknown users stay literal.
+    touched = (
+        next((f"working directory {str(cwd)!r}" for cwd in cwds if ".i-insist" in cwd.parts), None)
+        or next((repr(word) for word in words if names_config(word)), None)
+        or next((repr(word) for word in words if resolves_to_config(word, cwds)), None)
+    )
+    if touched is None:
+        return None
+    mutator = next(
+        (
+            word
             for word in words
-            if word and "\n" not in word
-        )
-    mutates = any(
-        Path(word).name
-        in {
-            "rm",
-            "mv",
-            "cp",
-            "install",
-            "touch",
-            "mkdir",
-            "rmdir",
-            "tee",
-            "truncate",
-            "chmod",
-            "chown",
-            "ln",
-            "patch",
-        }
-        or Path(word).name in {"python", "python3", "perl", "ruby", "node"}
-        or re.fullmatch(r"python3\.\d+", Path(word).name)
-        for word in words
+            if Path(word).name in MUTATORS | INTERPRETERS or re.fullmatch(r"python3\.\d+", Path(word).name)
+        ),
+        None,
     )
-    redirects_to_config = any(
-        ">" in word
-        and index + 1 < len(words)
-        and ".i-insist" in (cwd / os.path.expanduser(words[index + 1])).resolve().parts  # noqa: PTH111
-        for index, word in enumerate(words)
+    if mutator is not None:
+        return f"{touched} with command {mutator!r}"
+    redirect = next(
+        (
+            words[index + 1]
+            for index, word in enumerate(words)
+            if ">" in word and index + 1 < len(words) and resolves_to_config(words[index + 1], cwds)
+        ),
+        None,
     )
-    return touches and (
-        mutates
-        or redirects_to_config
-        or (any(Path(word).name == "sed" for word in words) and any(word.startswith("-i") for word in words))
-    )
+    if redirect is not None:
+        return f"redirect to {redirect!r}"
+    if any(Path(word).name == "sed" for word in words) and any(word.startswith("-i") for word in words):
+        return f"{touched} with 'sed -i'"
+    return None

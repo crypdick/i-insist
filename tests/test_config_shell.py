@@ -59,6 +59,15 @@ def test_config_shell_command_boundaries(workspace, separator, write):
         ('for target in ~/.i-insist/*; do rm "$target"; done', True),
         ('remove() { rm "$1"; }; remove ~/.i-insist/policy.toml', True),
         ("(cd ~/.i-insist; rm policy.toml)", True),
+        ("cd ~; i-insist --version; python3 -c 'print(1)'; ls .i-insist", False),
+        ("cd /tmp; ls ~/.i-insist; python3 /tmp/test_guard.py", False),
+        ("cd /tmp\nls ~/.i-insist\npython3 /tmp/test_guard.py", False),
+        ("touch ~/.i-insist-notes/policy.toml", False),
+        ("cd /tmp; cd ~/.i-insist; rm policy.toml", True),
+        ("cd ~/.i-insist || cd /tmp; rm policy.toml", True),
+        ("cd ~/.i-insist && python3 /tmp/test_guard.py", True),
+        ("cd ../.i-insist; rm policy.toml", True),
+        ("cd ~/.i-insist\nrm policy.toml", True),
     ],
 )
 def test_config_shell_quoting_and_writes(workspace, command, blocked):
@@ -73,7 +82,17 @@ def test_literal_tilde_alias_to_config_still_blocks(workspace, command):
     assert config_denied(workspace, command)
 
 
+def test_denial_names_the_matched_word_and_mutator(workspace):
+    message = config_result(workspace, "ls /tmp; rm ~/.i-insist/policy.toml")
+    assert "~/.i-insist/policy.toml" in message
+    assert "rm" in message
+
+
 def config_denied(workspace, command):
+    return bool(config_result(workspace, command))
+
+
+def config_result(workspace, command):
     result = subprocess.run(
         [sys.executable, "-m", "i_insist", "protect-config"],
         input=json.dumps(
@@ -91,4 +110,4 @@ def config_denied(workspace, command):
         text=True,
         check=True,
     )
-    return bool(json.loads(result.stdout))
+    return json.loads(result.stdout)

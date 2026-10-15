@@ -87,9 +87,10 @@ def main() -> int:
             return 0
         data = object_input(json.load(sys.stdin, parse_constant=reject_constant))
         if args.command == "protect-config":
-            from i_insist.protect_config import DENIAL_MESSAGE, should_block  # noqa: PLC0415
+            from i_insist.protect_config import DENIAL_MESSAGE, block_reason  # noqa: PLC0415
 
-            print(json.dumps(DENIAL_MESSAGE if should_block(Event.from_json(data)) else None))
+            reason = block_reason(Event.from_json(data))
+            print(json.dumps(None if reason is None else f"{DENIAL_MESSAGE} Matched {reason}."))
         elif args.command == "hook":
             run_hook(data, args.harness, args.event)
         else:
