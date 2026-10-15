@@ -59,8 +59,13 @@ checks. This is not arbitrary Python data-flow analysis or a shell sandbox.
 Separate shell commands are checked independently: listing `.i-insist` followed
 by an unrelated test or file operation does not require approval. Quoted and
 escaped separators stay within their command, as do redirection operators.
-Directory changes, variable assignments, shell control flow, substitutions,
-and other heredocs retain the conservative whole-call check.
+A literal `cd` is followed: later commands count as inside `.i-insist` if any
+directory reached so far was. Computed `cd` targets, `pushd`, `popd`, variable
+assignments, shell control flow, groups, substitutions, and other heredocs
+retain the conservative whole-call check. A path word names `.i-insist` only as
+a whole path component, so `.i-insist-notes` is a different directory. Words
+containing whitespace, quotes, globs, or `$` stay conservative.
+The denial message includes the matched word and command.
 Unknown `~user` names remain literal during path checks, so shell data such as
 Lua's `~=` operator does not cause a home-directory lookup error.
 
