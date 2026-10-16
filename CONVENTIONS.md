@@ -1,5 +1,9 @@
 # Design conventions
 
+For advisory module naming and durable coding preferences, use the
+`coding-conventions` skill shipped with Strictify. Read only its relevant
+references; the project-specific decisions below remain canonical.
+
 ## Keep harness policy in adapters
 
 Normalize harness payloads into `i_insist.events.Event` at adapter boundaries.
