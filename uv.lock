@@ -432,7 +432,7 @@ wheels = [
 
 [[package]]
 name = "i-insist"
-version = "0.4.11"
+version = "0.4.12"
 source = { editable = "." }
 dependencies = [
     { name = "beartype" },
