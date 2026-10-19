@@ -55,6 +55,13 @@ def tool(repo: Path, name: str = "Bash", **arguments: object) -> dict:
 
 
 def denial(result) -> str:
+    response = denial_response(result)
+    if "\nReason: " in response:
+        return response.split("\nReason: ", 1)[1].split("\nTo override this check", 1)[0]
+    return response
+
+
+def denial_response(result) -> str:
     assert result.returncode == 0, result.stderr
     output = json.loads(result.stdout)["hookSpecificOutput"]
     assert output["permissionDecision"] == "deny"

@@ -39,6 +39,10 @@ Include `I insist` anywhere in your message, in any capitalization:
 I insist, update both protected files.
 ```
 
+When a rule blocks a tool call, its denial names the rule, shows the triggering
+command or paths, and includes the checker's reason. For overridable rules, it
+also tells the agent to ask you to say `I insist`.
+
 Approval lasts for the current response and resets with your next message or
 when you start or resume a session. Quoted text and code blocks count too.
 

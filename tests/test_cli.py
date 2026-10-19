@@ -9,14 +9,35 @@ from pathlib import Path
 
 import pytest
 
-from tests.support import allowed, denial, hook_path, invoke, manage_hooks, rule, tool
+from tests.support import allowed, denial, denial_response, hook_path, invoke, manage_hooks, rule, tool
 
 
 @pytest.mark.parametrize("harness", ["codex", "claude"])
-def test_checker_blocks_with_exact_checker_message(workspace: Path, harness: str):
+def test_denial_names_rule_trigger_reason_and_override_phrase(workspace: Path, harness: str):
     rule(workspace, 'import json; print(json.dumps("Blocked by guard"))')
-    assert denial(invoke(workspace, tool(workspace, command="git status"), harness=harness)) == (
-        "Blocked by guard"
+    assert denial_response(invoke(workspace, tool(workspace, command="git status"), harness=harness)) == (
+        'Rule "guard" blocked this call.\nTrigger: command "git status"\nReason: Blocked by guard\n'
+        'To override this check, ask the human to say "I insist".'
+    )
+
+
+def test_denial_shows_file_path_trigger(workspace: Path):
+    rule(workspace, 'import json; print(json.dumps("Blocked by guard"))')
+    payload = tool(workspace, "Write", file_path="a.txt", content="hello")
+    assert denial_response(invoke(workspace, payload)) == (
+        f'Rule "guard" blocked this call.\nTrigger: paths ["{workspace / "a.txt"}"]\n'
+        'Reason: Blocked by guard\nTo override this check, ask the human to say "I insist".'
+    )
+
+
+def test_non_overridable_rule_names_trigger_without_suggesting_override(workspace: Path):
+    rule(
+        workspace,
+        'import json; print(json.dumps("Blocked by guard"))',
+        extra="overridable = false\n",
+    )
+    assert denial_response(invoke(workspace, tool(workspace))) == (
+        'Rule "guard" blocked this call.\nTrigger: command "true"\nReason: Blocked by guard'
     )
 
 

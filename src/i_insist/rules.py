@@ -16,6 +16,8 @@ from pathlib import Path
 
 from i_insist.events import Event, GuardError
 
+OVERRIDE_GUIDANCE = 'To override this check, ask the human to say "I insist".'
+
 
 @dataclass(frozen=True)
 class Rule:
@@ -166,6 +168,19 @@ def run_checker(rule: Rule, event: Event) -> str | None:
     raise GuardError(f"checker {rule.id}: checker must print JSON null or a nonempty string")
 
 
+def denial_message(rule: Rule, event: Event, reason: str) -> str:
+    if event.command is not None:
+        trigger = f"command {json.dumps(event.command)}"
+    elif event.paths:
+        trigger = f"paths {json.dumps([str(path) for path in event.paths])}"
+    else:
+        trigger = f"tool {json.dumps(event.tool_name)}"
+    message = f"Rule {json.dumps(rule.id)} blocked this call.\nTrigger: {trigger}\nReason: {reason}"
+    if rule.overridable:
+        message = f"{message}\n{OVERRIDE_GUIDANCE}"
+    return message
+
+
 def check(event: Event, *, approved: bool = False) -> str | None:
     try:
         rules = [rule for path in config_files(event) for rule in load_rules(path)]
@@ -176,5 +191,5 @@ def check(event: Event, *, approved: bool = False) -> str | None:
             continue
         message = run_checker(rule, event)
         if message is not None:
-            return message
+            return denial_message(rule, event, message)
     return None
