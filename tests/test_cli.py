@@ -285,7 +285,13 @@ def test_neutral_check_protocol(workspace: Path):
         timeout=10,
     )
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == {"blocked": True, "message": "Blocked by guard"}
+    assert json.loads(result.stdout) == {
+        "blocked": True,
+        "message": (
+            'Rule "guard" blocked this call.\nTrigger: tool "send_email"\nReason: Blocked by guard\n'
+            'To override this check, ask the human to say "I insist".'
+        ),
+    }
 
 
 def test_unknown_tool_arguments_are_not_interpreted_as_shell_metadata(workspace: Path):

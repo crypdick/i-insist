@@ -76,7 +76,13 @@ def test_custom_harness_changes_reach_checker_and_target_rules(workspace):
         timeout=10,
     )
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == {"blocked": True, "message": "Blocked by guard"}
+    assert json.loads(result.stdout) == {
+        "blocked": True,
+        "message": (
+            f'Rule "guard" blocked this call.\nTrigger: paths ["{target / "note.md"}"]\n'
+            'Reason: Blocked by guard\nTo override this check, ask the human to say "I insist".'
+        ),
+    }
 
 
 @pytest.mark.parametrize(

@@ -239,7 +239,13 @@ def test_neutral_check_keeps_non_overridable_rules(workspace: Path):
         text=True,
     )
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == {"blocked": True, "message": "Blocked by guard"}
+    assert json.loads(result.stdout) == {
+        "blocked": True,
+        "message": (
+            'Rule "guard" blocked this call.\nTrigger: command "HUMAN_PERMISSION_GRANTED=1 true"\n'
+            "Reason: Blocked by guard"
+        ),
+    }
 
 
 def test_reinstall_regenerates_owned_rule_and_preserves_other_providers(workspace):
