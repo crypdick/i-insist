@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import itertools
 import os
 import re
 import shlex
@@ -36,6 +37,28 @@ MUTATORS = frozenset(
     }
 )
 INTERPRETERS = frozenset({"python", "python3", "perl", "ruby", "node"})
+# Commands that may execute or apply heredoc input, directly or through a wrapper.
+STDIN_EXECUTORS = INTERPRETERS | {
+    "sh",
+    "bash",
+    "zsh",
+    "dash",
+    "ksh",
+    "fish",
+    "xargs",
+    "patch",
+    "git",
+    "eval",
+    "source",
+    ".",
+    "awk",
+    "sudo",
+    "env",
+    "exec",
+    "ssh",
+}
+QUOTED_DELIMITER = re.compile(r"-?(['\"])(\w+)\1")
+WHOLE_CALL_MARKERS = ("$(", "`", "<<", "<(", ">(")
 
 
 def python_config_reference(source: str) -> str:
@@ -95,13 +118,58 @@ def block_reason(event: Event) -> str | None:
         return None
     # Every directory a literal `cd` may have reached stays suspect for later commands.
     cwds = [event.cwd]
-    for part in shell_commands(normalize_python_heredocs(event.command)):
+    command = strip_data_heredocs(normalize_python_heredocs(event.command))
+    parts = shell_commands(command)
+    whole = parts == [command] and re.search(r"[;\n&|]", command) is not None
+    for part in parts:
         target = cd_target(part, cwds[-1])
         if target is not None:
             cwds.append(target)
         if reason := shell_command_blocks(part, cwds):
+            if whole:
+                return (
+                    f"{reason} (call checked as a whole because it uses heredocs, "
+                    "command substitution, or shell control flow)"
+                )
             return reason
     return None
+
+
+def strip_data_heredocs(command: str) -> str:
+    """Drop quoted heredoc bodies that only feed data to a non-executing command."""
+    # NOTE: README.md documents which heredoc receivers keep their bodies checked.
+    lines = command.split("\n")
+    result: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        index += 1
+        try:
+            lexer = shlex.shlex(line, posix=False, punctuation_chars="<>|;&()")
+            lexer.whitespace_split = True
+            tokens = list(lexer)
+        except ValueError:
+            return command
+        heredocs = [(op, word) for op, word in itertools.pairwise(tokens) if op == "<<"]
+        delimiters = [match for _, word in heredocs if (match := QUOTED_DELIMITER.fullmatch(word))]
+        executes = any(
+            Path(token.strip("'\"")).name in STDIN_EXECUTORS or re.fullmatch(PYTHON, token)
+            for token in tokens
+        )
+        if not heredocs or len(delimiters) != len(heredocs) or executes:
+            result.append(line)
+            continue
+        for match in delimiters:
+            while (
+                index < len(lines)
+                and (lines[index].lstrip("\t") if match[0].startswith("-") else lines[index]) != match[2]
+            ):
+                index += 1
+            if index == len(lines):
+                return command
+            index += 1
+        result.append(re.sub(r"<<[ \t]*-?(['\"])\w+\1", "", line))
+    return "\n".join(result)
 
 
 def cd_target(command: str, cwd: Path) -> Path | None:
@@ -190,9 +258,11 @@ def shell_command_blocks(command: str, cwds: Sequence[Path]) -> str | None:
         return None
     mutator = next(
         (
-            word
+            name
             for word in words
-            if Path(word).name in MUTATORS | INTERPRETERS or re.fullmatch(r"python3\.\d+", Path(word).name)
+            # Substitutions such as $(rm ...) still name the program they run.
+            if (name := Path(word.lstrip("$(`")).name) in MUTATORS | INTERPRETERS
+            or re.fullmatch(r"python3\.\d+", name)
         ),
         None,
     )
