@@ -48,6 +48,8 @@ also tells the agent to ask you to say `I insist`.
 
 Approval lasts for the current response and resets with your next message or
 when you start or resume a session. Quoted text and code blocks count too.
+Teammate or subagent messages that arrive during the response don't reset it,
+because the harness doesn't report them as new prompts.
 
 Rules marked `overridable = false` still run. Invalid configuration still blocks
 approved calls. Approval doesn't override other plugins or the agent's own
