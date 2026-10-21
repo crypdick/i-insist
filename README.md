@@ -65,8 +65,11 @@ by an unrelated test or file operation does not require approval. Quoted and
 escaped separators stay within their command, as do redirection operators.
 A literal `cd` is followed: later commands count as inside `.i-insist` if any
 directory reached so far was. Computed `cd` targets, `pushd`, `popd`, variable
-assignments, shell control flow, groups, substitutions, and other heredocs
-retain the conservative whole-call check. A path word names `.i-insist` only as
+assignments, shell control flow, groups, substitutions, and unquoted heredocs
+retain the conservative whole-call check, and denials say so. A quoted heredoc
+(`<<'EOF'`) body is data, so it's ignored when no command on its line can execute
+or apply input: shells, interpreters, `xargs`, `patch`, `git`, `awk`, `eval`,
+`source`, `sudo`, `env`, `exec`, and `ssh` keep their bodies checked. A path word names `.i-insist` only as
 a whole path component, so `.i-insist-notes` is a different directory. Words
 containing whitespace, quotes, globs, or `$` stay conservative.
 The denial message includes the matched word and command.

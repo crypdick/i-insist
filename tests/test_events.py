@@ -53,6 +53,15 @@ def test_checker_receives_neutral_file_changes(workspace, name, arguments, chang
     allowed(invoke(workspace, tool(workspace, name, **arguments)))
 
 
+@pytest.mark.parametrize(("supplied", "expected"), [({"tool_use_id": "toolu_1"}, "toolu_1"), ({}, None)])
+def test_checker_receives_tool_use_id(workspace, supplied, expected):
+    rule(
+        workspace,
+        f"import json, sys\nassert json.load(sys.stdin)['tool_use_id'] == {expected!r}\nprint('null')",
+    )
+    allowed(invoke(workspace, {**tool(workspace), **supplied}))
+
+
 def test_custom_harness_changes_reach_checker_and_target_rules(workspace):
     target = workspace / "protected"
     target.mkdir()

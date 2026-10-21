@@ -11,7 +11,7 @@ from i_insist.approval import context, prompt_approves, shell_approved
 from i_insist.events import Event, GuardError, Json, normalize_hook, object_input
 from i_insist.rules import check
 
-TOOL_EVENTS = ("pre-tool-use", "post-tool-use")
+TOOL_EVENTS = ("pre-tool-use", "post-tool-use", "post-tool-use-failure")
 
 
 def reject_constant(value: str) -> None:
@@ -32,8 +32,22 @@ def deny(message: str) -> None:
     )
 
 
-def feedback(message: str) -> None:
-    print(json.dumps({"decision": "block", "reason": message}))
+def feedback(message: str, event_name: str) -> None:
+    if event_name == "post-tool-use-failure":
+        # Claude documents only additional context for failed tool calls.
+        output: dict[str, Json] = {
+            "hookSpecificOutput": {"hookEventName": "PostToolUseFailure", "additionalContext": message}
+        }
+    else:
+        output = {"decision": "block", "reason": message}
+    print(json.dumps(output))
+
+
+def respond(message: str, event_name: str) -> None:
+    if event_name == "pre-tool-use":
+        deny(message)
+    else:
+        feedback(message, event_name)
 
 
 def run_hook(data: dict[str, Json], harness: str, event_name: str) -> None:
@@ -53,10 +67,10 @@ def run_hook(data: dict[str, Json], harness: str, event_name: str) -> None:
     else:
         event = normalize_hook(data, harness)
         approved = shell_approved(event) or bool(approvals and approvals.allows(turn))
-        if event_name == "post-tool-use":
+        if event_name != "pre-tool-use":
             reason = check(event, approved=approved, phase="post")
             if reason is not None:
-                feedback(reason)
+                feedback(reason, event_name)
             return
         reason = check(event, approved=approved)
         if reason is not None:
@@ -112,7 +126,7 @@ def main() -> int:
     except (GuardError, OSError, ValueError) as exc:
         message = f"i-insist: {exc}"
         if args.command == "hook" and args.event in TOOL_EVENTS:
-            (deny if args.event == "pre-tool-use" else feedback)(message)
+            respond(message, args.event)
             return 0
         if args.command == "check":
             print(json.dumps({"blocked": True, "message": message}))

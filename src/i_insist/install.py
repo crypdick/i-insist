@@ -21,8 +21,9 @@ EVENTS = {
     "UserPromptSubmit": "user-prompt-submit",
     "SessionStart": "session-start",
 }
-
-TOOL_HOOKS = {"PreToolUse", "PostToolUse"}
+# Claude reports failed tool calls, including nonzero shell exits, only through this event.
+CLAUDE_EVENTS = {**EVENTS, "PostToolUseFailure": "post-tool-use-failure"}
+TOOL_HOOKS = {"PreToolUse", "PostToolUse", "PostToolUseFailure"}
 
 
 def configuration_path(harness: str) -> Path:
@@ -63,7 +64,7 @@ def edit_hooks(document: dict[str, Json], harness: str, *, install: bool) -> boo
     if not isinstance(hooks, dict):
         raise ValueError("hooks must be an object")  # noqa: TRY004
     changed = False
-    for name, event in EVENTS.items():
+    for name, event in (CLAUDE_EVENTS if harness == "claude" else EVENTS).items():
         groups = hooks.get(name, [])
         if not isinstance(groups, list):
             raise ValueError(f"hooks.{name} must be an array")  # noqa: TRY004

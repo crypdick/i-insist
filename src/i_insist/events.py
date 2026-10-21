@@ -66,6 +66,7 @@ class Event:
     tool_name: str
     tool_input: Json
     changes: tuple[FileChange, ...] = ()
+    tool_use_id: str | None = None
 
     def as_json(self) -> dict[str, Json]:
         return {
@@ -77,6 +78,7 @@ class Event:
             "tool_name": self.tool_name,
             "tool_input": self.tool_input,
             "changes": [change.as_json() for change in self.changes],
+            "tool_use_id": self.tool_use_id,
         }
 
     @classmethod
@@ -98,6 +100,7 @@ class Event:
         if not isinstance(changes, list):
             raise GuardError("input changes must be an array")
         parsed_changes = tuple(FileChange.from_json(change, cwd) for change in changes)
+        tool_use_id = data.get("tool_use_id")
         targets = [absolute_path(text_field(path, "path"), cwd) for path in paths]
         targets.extend(change.path for change in parsed_changes)
         return cls(
@@ -109,6 +112,7 @@ class Event:
             text_field(data.get("tool_name"), "tool_name"),
             data.get("tool_input"),
             parsed_changes,
+            None if tool_use_id is None else text_field(tool_use_id, "tool_use_id"),
         )
 
 
@@ -181,4 +185,15 @@ def normalize_hook(data: dict[str, Json], harness: str) -> Event:
         patch = text_field(patch, "patch")
         changes = patch_changes(patch, cwd)
         paths = [change.path for change in changes]
-    return Event(kind, command, cwd, tuple(dict.fromkeys(paths)), harness, name, native, changes)
+    tool_use_id = data.get("tool_use_id")
+    return Event(
+        kind,
+        command,
+        cwd,
+        tuple(dict.fromkeys(paths)),
+        harness,
+        name,
+        native,
+        changes,
+        tool_use_id if isinstance(tool_use_id, str) and tool_use_id else None,
+    )

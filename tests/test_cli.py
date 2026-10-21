@@ -348,6 +348,7 @@ def test_installed_hooks_block_approve_and_reset(workspace: Path, harness: str):
 
     assert run("SessionStart", source="startup").returncode == 0
     allowed(run("PostToolUse", tool_response="done"))
+    assert ("PostToolUseFailure" in hooks) is (harness == "claude")
     assert denial(run("PreToolUse")) == "Blocked by guard"
     allowed(run("UserPromptSubmit", prompt="I insist"))
     allowed(run("PreToolUse"))
@@ -420,3 +421,18 @@ def test_approval_skips_post_rules(workspace: Path):
     rule(workspace, 'import json; print(json.dumps("Left changes"))', extra='phase = "post"\n')
     allowed(invoke(workspace, {**tool(workspace), "prompt": "I insist"}, "user-prompt-submit"))
     allowed(invoke(workspace, tool(workspace), "post-tool-use"))
+
+
+def test_claude_failed_tools_get_post_rule_context(workspace: Path):
+    rule(workspace, 'import json; print(json.dumps("Left changes"))', extra='phase = "post"\n')
+    payload = {**tool(workspace, command="sed -i x a.txt && false"), "error": "Exit code 1"}
+    result = invoke(workspace, payload, "post-tool-use-failure", harness="claude")
+    assert result.returncode == 0, result.stderr
+    output = json.loads(result.stdout)["hookSpecificOutput"]
+    assert output["hookEventName"] == "PostToolUseFailure"
+    assert output["additionalContext"].startswith('Rule "guard" flagged this call.')
+    rule(workspace, "raise RuntimeError('broken')", extra='phase = "post"\n')
+    result = invoke(workspace, payload, "post-tool-use-failure", harness="claude")
+    assert json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"].startswith(
+        "i-insist: checker"
+    )

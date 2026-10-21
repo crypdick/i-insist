@@ -74,6 +74,32 @@ def test_config_shell_quoting_and_writes(workspace, command, blocked):
     assert config_denied(workspace, command) is blocked
 
 
+@pytest.mark.parametrize(
+    ("command", "blocked"),
+    [
+        ("obsidian-knowledge write note.md <<'END'\nIt's about ~/.i-insist/policy.toml\nEND", False),
+        ('cat > /tmp/note.md <<"EOF"\nrm ~/.i-insist/policy.toml\nEOF', False),
+        ("cat <<-'EOF' > /tmp/note.md\n\trm ~/.i-insist/policy.toml\n\tEOF", False),
+        ("cat > ~/.i-insist/policy.toml <<'EOF'\n[[rules]]\nEOF", True),
+        ("tee ~/.i-insist/policy.toml <<'EOF'\n[[rules]]\nEOF", True),
+        ("cat <<'EOF'\nhello\nEOF\nrm ~/.i-insist/policy.toml", True),
+        ("bash <<'EOF'\nrm ~/.i-insist/policy.toml\nEOF", True),
+        ("sudo sh <<'EOF'\nrm ~/.i-insist/policy.toml\nEOF", True),
+        ("xargs rm <<'EOF'\n~/.i-insist/policy.toml\nEOF", True),
+        ("cat <<EOF\n$(rm ~/.i-insist/policy.toml)\nEOF", True),
+        ("echo \"<<'X'\"\nrm ~/.i-insist/policy.toml\nX", True),
+        ("cat <<'EOF'\nunterminated\nrm ~/.i-insist/policy.toml", True),
+    ],
+)
+def test_quoted_heredoc_data_is_not_a_command(workspace, command, blocked):
+    assert config_denied(workspace, command) is blocked
+
+
+def test_whole_call_denial_says_it_was_checked_as_a_whole(workspace):
+    message = config_result(workspace, "uv tool install x\necho $(date)\nmkdir ~/.i-insist")
+    assert "checked as a whole" in message
+
+
 @pytest.mark.parametrize("command", ["printf ok > '~=alias/policy.toml'", "touch '~=alias/policy.toml'"])
 def test_literal_tilde_alias_to_config_still_blocks(workspace, command):
     protected = workspace / ".i-insist"

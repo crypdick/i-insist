@@ -5,7 +5,9 @@ and everyday use, see the [README](../README.md).
 
 ## Hook registration
 
-The installer registers `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, and `SessionStart` in:
+The installer registers `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, and `SessionStart`
+in the following files. For Claude Code it also registers `PostToolUseFailure`, because
+Claude sends failed tool calls, including shell commands that exit nonzero, only to that event.
 
 - Codex: `~/.codex/hooks.json`, or `$CODEX_HOME/hooks.json`.
 - Claude Code: `~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR/settings.json`.
@@ -51,7 +53,9 @@ and blocks it. `"post"` runs after the tool finishes and sends the checker's mes
 back to the agent as feedback; the tool's effects remain. Use post rules to detect
 side effects that a pre rule can't predict, such as files changed by a script.
 Post checkers receive the same neutral event, and approval skips overridable post
-rules too. A post checker failure is reported as feedback.
+rules too. A post checker failure is reported as feedback. Post rules run for both
+successful and failed tool calls; Claude's failure event receives the message as
+additional context. To pair pre and post work for one call, key it by `tool_use_id`.
 
 Store checkers anywhere. The optional `.i-insist/scripts/` directory is one
 convention. The runner executes the `checker` argument list without a shell.
@@ -146,7 +150,8 @@ The checker receives input in this format:
   "harness": "claude",
   "tool_name": "Write",
   "tool_input": {"file_path": "_sources/original.txt", "content": "replacement"},
-  "changes": [{"path": "/repo/_sources/original.txt", "operation": "write", "content": "replacement"}]
+  "changes": [{"path": "/repo/_sources/original.txt", "operation": "write", "content": "replacement"}],
+  "tool_use_id": "toolu_01ABC"
 }
 ```
 
@@ -162,6 +167,7 @@ The fields have these meanings:
 | `tool_name` | Original tool name |
 | `tool_input` | Original tool arguments, unchanged, including unknown fields |
 | `changes` | File changes: absolute `path`, `operation` (`write`, `edit`, or `delete`), and text `content` |
+| `tool_use_id` | Harness identifier shared by one call's pre and post hooks, or `null` when the harness omits it |
 
 Adapters recognize shell calls and common direct editing tools, including
 `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, and `apply_patch`. Patch targets
