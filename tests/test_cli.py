@@ -368,6 +368,21 @@ def test_example_provider_with_real_files(workspace: Path):
     allowed(invoke(workspace, tool(workspace, "Write", file_path="notes.txt")))
 
 
+def test_uv_version_example_blocks_manual_version_edits(workspace: Path):
+    import shutil
+
+    example = Path(__file__).resolve().parents[1] / "examples/uv-version"
+    shutil.copytree(example, workspace / ".i-insist")
+    pyproject = workspace / "pyproject.toml"
+    pyproject.write_text('[project]\nname = "demo"\nversion = "0.1.0"\ndependencies = []\n')
+    (workspace / "uv.lock").write_text("")
+    edit = {"file_path": str(pyproject), "old_string": '"0.1.0"', "new_string": '"0.2.0"'}
+    assert "uv version --bump" in denial(invoke(workspace, tool(workspace, "Edit", **edit), harness="claude"))
+    edit = {"file_path": str(pyproject), "old_string": "[]", "new_string": '["httpx"]'}
+    allowed(invoke(workspace, tool(workspace, "Edit", **edit), harness="claude"))
+    allowed(invoke(workspace, tool(workspace, command="uv version --bump minor")))
+
+
 def test_nonfinite_json_is_rejected_before_checker_starts(workspace: Path):
     marker = workspace / "started"
     rule(workspace, f"from pathlib import Path\nPath({str(marker)!r}).touch()\nprint('null')")

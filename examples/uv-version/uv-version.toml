@@ -1,0 +1,3 @@
+[[rules]]
+id = "uv-version/manual-bump"
+checker = ["python3", "uv-version.py"]
