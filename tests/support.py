@@ -71,3 +71,10 @@ def denial_response(result) -> str:
 def allowed(result) -> None:
     assert result.returncode == 0, result.stderr
     assert not result.stdout.strip(), result.stdout
+
+
+def feedback(result) -> str:
+    assert result.returncode == 0, result.stderr
+    output = json.loads(result.stdout)
+    assert output["decision"] == "block"
+    return output["reason"]

@@ -11,6 +11,8 @@ from i_insist.approval import context, prompt_approves, shell_approved
 from i_insist.events import Event, GuardError, Json, normalize_hook, object_input
 from i_insist.rules import check
 
+TOOL_EVENTS = ("pre-tool-use", "post-tool-use")
+
 
 def reject_constant(value: str) -> None:
     raise GuardError(f"input contains non-JSON numeric constant {value}")
@@ -30,8 +32,12 @@ def deny(message: str) -> None:
     )
 
 
+def feedback(message: str) -> None:
+    print(json.dumps({"decision": "block", "reason": message}))
+
+
 def run_hook(data: dict[str, Json], harness: str, event_name: str) -> None:
-    approvals, turn = context(data, harness, required=event_name != "pre-tool-use")
+    approvals, turn = context(data, harness, required=event_name not in TOOL_EVENTS)
     if event_name == "user-prompt-submit":
         prompt = data.get("prompt")
         if not isinstance(prompt, str):
@@ -47,6 +53,11 @@ def run_hook(data: dict[str, Json], harness: str, event_name: str) -> None:
     else:
         event = normalize_hook(data, harness)
         approved = shell_approved(event) or bool(approvals and approvals.allows(turn))
+        if event_name == "post-tool-use":
+            reason = check(event, approved=approved, phase="post")
+            if reason is not None:
+                feedback(reason)
+            return
         reason = check(event, approved=approved)
         if reason is not None:
             deny(reason)
@@ -61,7 +72,7 @@ def main() -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     hook = commands.add_parser("hook", help="Handle a public harness hook payload on stdin")
     hook.add_argument("--harness", choices=("codex", "claude"), required=True)
-    hook.add_argument("event", choices=("pre-tool-use", "user-prompt-submit", "session-start"))
+    hook.add_argument("event", choices=(*TOOL_EVENTS, "user-prompt-submit", "session-start"))
     commands.add_parser("protect-config", help="Check edits to i-insist configuration")
     commands.add_parser("ensure", help="Install and verify hooks for available harnesses")
     commands.add_parser("check", help="Check a normalized event from any harness on stdin")
@@ -100,8 +111,8 @@ def main() -> int:
         return 0
     except (GuardError, OSError, ValueError) as exc:
         message = f"i-insist: {exc}"
-        if args.command == "hook" and args.event == "pre-tool-use":
-            deny(message)
+        if args.command == "hook" and args.event in TOOL_EVENTS:
+            (deny if args.event == "pre-tool-use" else feedback)(message)
             return 0
         if args.command == "check":
             print(json.dumps({"blocked": True, "message": message}))

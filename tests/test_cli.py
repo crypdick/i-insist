@@ -9,7 +9,17 @@ from pathlib import Path
 
 import pytest
 
-from tests.support import allowed, denial, denial_response, hook_path, invoke, manage_hooks, rule, tool
+from tests.support import (
+    allowed,
+    denial,
+    denial_response,
+    feedback,
+    hook_path,
+    invoke,
+    manage_hooks,
+    rule,
+    tool,
+)
 
 
 @pytest.mark.parametrize("harness", ["codex", "claude"])
@@ -150,7 +160,7 @@ def test_checker_crash_or_timeout_blocks(workspace: Path, script: str):
     assert "checker" in denial(invoke(workspace, tool(workspace)))
 
 
-@pytest.mark.parametrize("extra", ["enabled = 'false'", "timeout = -1", "unknown = true"])
+@pytest.mark.parametrize("extra", ["enabled = 'false'", "timeout = -1", "unknown = true", "phase = 'later'"])
 def test_bad_rule_config_blocks(workspace: Path, extra: str):
     rule(workspace, "print('null')", extra=extra)
     assert "configuration" in denial(invoke(workspace, tool(workspace)))
@@ -337,6 +347,7 @@ def test_installed_hooks_block_approve_and_reset(workspace: Path, harness: str):
         )
 
     assert run("SessionStart", source="startup").returncode == 0
+    allowed(run("PostToolUse", tool_response="done"))
     assert denial(run("PreToolUse")) == "Blocked by guard"
     allowed(run("UserPromptSubmit", prompt="I insist"))
     allowed(run("PreToolUse"))
@@ -382,3 +393,30 @@ def test_checker_exception_is_reported_without_losing_final_line(workspace: Path
     assert "exited 1" in message
     assert "Traceback" in message
     assert "RuntimeError: policy unavailable" in message
+
+
+@pytest.mark.parametrize("harness", ["codex", "claude"])
+def test_post_rules_give_feedback_after_the_tool_runs(workspace: Path, harness: str):
+    rule(workspace, 'import json; print(json.dumps("Left changes"))', extra='phase = "post"\n')
+    payload = {**tool(workspace, command="sed -i x a.txt"), "tool_response": "done"}
+    allowed(invoke(workspace, payload, harness=harness))
+    assert feedback(invoke(workspace, payload, "post-tool-use", harness=harness)) == (
+        'Rule "guard" flagged this call.\nTrigger: command "sed -i x a.txt"\nReason: Left changes\n'
+        'To override this check, ask the human to say "I insist".'
+    )
+
+
+def test_pre_rules_do_not_run_after_the_tool(workspace: Path):
+    rule(workspace, 'import json; print(json.dumps("Blocked by guard"))', extra='phase = "pre"\n')
+    allowed(invoke(workspace, tool(workspace), "post-tool-use"))
+
+
+def test_post_rule_failure_is_reported_as_feedback(workspace: Path):
+    rule(workspace, "raise RuntimeError('broken')", extra='phase = "post"\n')
+    assert feedback(invoke(workspace, tool(workspace), "post-tool-use")).startswith("i-insist: checker guard")
+
+
+def test_approval_skips_post_rules(workspace: Path):
+    rule(workspace, 'import json; print(json.dumps("Left changes"))', extra='phase = "post"\n')
+    allowed(invoke(workspace, {**tool(workspace), "prompt": "I insist"}, "user-prompt-submit"))
+    allowed(invoke(workspace, tool(workspace), "post-tool-use"))

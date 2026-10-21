@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from i_insist.events import Event, GuardError
+from i_insist.events import Event, GuardError, Phase
 
 OVERRIDE_GUIDANCE = 'To override this check, ask the human to say "I insist".'
 
@@ -26,6 +26,7 @@ class Rule:
     directory: Path
     timeout: float
     overridable: bool
+    phase: Phase
 
 
 def config_files(event: Event) -> list[Path]:
@@ -64,7 +65,7 @@ def load_rules(path: Path) -> list[Rule]:
         for entry in entries:
             if not isinstance(entry, dict):
                 raise ValueError("each rule must be a table")  # noqa: TRY004
-            if entry.keys() - {"id", "checker", "timeout", "overridable"}:
+            if entry.keys() - {"id", "checker", "timeout", "overridable", "phase"}:
                 raise ValueError("unknown rule fields")
             name, checker = (entry.get(key) for key in ("id", "checker"))
             if not isinstance(name, str) or not name.strip() or name in ids:
@@ -79,10 +80,13 @@ def load_rules(path: Path) -> list[Rule]:
             overridable = entry.get("overridable", True)
             if not isinstance(overridable, bool):
                 raise ValueError(f"{name}: overridable must be a boolean")  # noqa: TRY004
+            phase = entry.get("phase", "pre")
+            if phase not in ("pre", "post"):
+                raise ValueError(f"{name}: phase must be pre or post")
             timeout = entry.get("timeout", 10)
             if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
                 raise ValueError(f"{name}: timeout must be a positive finite number")
-            result.append(Rule(name, tuple(checker), path.parent, float(timeout), overridable))
+            result.append(Rule(name, tuple(checker), path.parent, float(timeout), overridable, phase))
             ids.add(name)
         return result
     except (OSError, ValueError) as exc:
@@ -175,19 +179,20 @@ def denial_message(rule: Rule, event: Event, reason: str) -> str:
         trigger = f"paths {json.dumps([str(path) for path in event.paths])}"
     else:
         trigger = f"tool {json.dumps(event.tool_name)}"
-    message = f"Rule {json.dumps(rule.id)} blocked this call.\nTrigger: {trigger}\nReason: {reason}"
+    outcome = "blocked" if rule.phase == "pre" else "flagged"
+    message = f"Rule {json.dumps(rule.id)} {outcome} this call.\nTrigger: {trigger}\nReason: {reason}"
     if rule.overridable:
         message = f"{message}\n{OVERRIDE_GUIDANCE}"
     return message
 
 
-def check(event: Event, *, approved: bool = False) -> str | None:
+def check(event: Event, *, approved: bool = False, phase: Phase = "pre") -> str | None:
     try:
         rules = [rule for path in config_files(event) for rule in load_rules(path)]
     except OSError as exc:
         raise GuardError(f"configuration discovery: {exc}") from exc
     for rule in rules:
-        if approved and rule.overridable:
+        if rule.phase != phase or (approved and rule.overridable):
             continue
         message = run_checker(rule, event)
         if message is not None:
