@@ -28,6 +28,9 @@ files. Other checks come from your plugins or scripts.
 
 To write your own, start with the [runnable example](examples/project) and
 [rule and checker reference](docs/reference.md#add-a-rule).
+The [uv version example](examples/uv-version) is a global rule: copy its files
+into `~/.i-insist/` to block hand-edited versions in uv projects in favor of
+`uv version --bump`.
 Plugin installers replace their generated registrations, so don't edit those
 files to customize a plugin.
 
