@@ -17,9 +17,12 @@ from i_insist.events import GuardError, Json
 
 EVENTS = {
     "PreToolUse": "pre-tool-use",
+    "PostToolUse": "post-tool-use",
     "UserPromptSubmit": "user-prompt-submit",
     "SessionStart": "session-start",
 }
+
+TOOL_HOOKS = {"PreToolUse", "PostToolUse"}
 
 
 def configuration_path(harness: str) -> Path:
@@ -82,11 +85,11 @@ def edit_hooks(document: dict[str, Json], harness: str, *, install: bool) -> boo
                     {
                         "type": "command",
                         "command": f"i-insist hook --harness {harness} {event}",
-                        "timeout": 600 if name == "PreToolUse" else 10,
+                        "timeout": 600 if name in TOOL_HOOKS else 10,
                     }
                 ]
             }
-            if name == "PreToolUse":
+            if name in TOOL_HOOKS:
                 entry["matcher"] = ".*"
             retained.append(entry)
         if retained == groups:
@@ -195,6 +198,7 @@ def check_enabled(document: dict[str, Json], harness: str, path: Path) -> None:
             continue
         snake = {
             "PreToolUse": "pre_tool_use",
+            "PostToolUse": "post_tool_use",
             "SessionStart": "session_start",
             "UserPromptSubmit": "user_prompt_submit",
         }[event]

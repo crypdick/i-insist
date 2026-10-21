@@ -5,13 +5,13 @@ and everyday use, see the [README](../README.md).
 
 ## Hook registration
 
-The installer registers `PreToolUse`, `UserPromptSubmit`, and `SessionStart` in:
+The installer registers `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, and `SessionStart` in:
 
 - Codex: `~/.codex/hooks.json`, or `$CODEX_HOME/hooks.json`.
 - Claude Code: `~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR/settings.json`.
 
 `SessionStart` silently resets approval on startup and resume; compaction preserves it.
-Only a denied tool call sends a checker message to the agent.
+Only a denied or flagged tool call sends a checker message to the agent.
 
 It preserves other settings, hooks, file permissions, and symlinks. Repeated runs
 don't create duplicate registrations. Writes are atomic, and concurrent installers
@@ -34,6 +34,7 @@ my-project/
 id = "my-plugin/protected-folders"
 checker = ["python3", "../tools/protect_folders.py"]
 # timeout = 10
+# phase = "pre"
 ```
 
 Providers generate and own their registrations. Setup replaces each provider's
@@ -44,6 +45,13 @@ messages in the checker.
 positive. Each TOML file can contain multiple `[[rules]]`. IDs must be unique within
 their file. Invalid configuration blocks execution rather than silently omitting
 a check. The runner rejects the former `message` and `enabled` fields.
+
+`phase` selects when the checker runs. The default, `"pre"`, runs before the tool
+and blocks it. `"post"` runs after the tool finishes and sends the checker's message
+back to the agent as feedback; the tool's effects remain. Use post rules to detect
+side effects that a pre rule can't predict, such as files changed by a script.
+Post checkers receive the same neutral event, and approval skips overridable post
+rules too. A post checker failure is reported as feedback.
 
 Store checkers anywhere. The optional `.i-insist/scripts/` directory is one
 convention. The runner executes the `checker` argument list without a shell.

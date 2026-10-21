@@ -8,6 +8,7 @@ from typing import Literal, cast
 
 type Json = bool | int | float | str | list[Json] | dict[str, Json] | None
 type Kind = Literal["shell", "file_write", "file_edit", "other"]
+type Phase = Literal["pre", "post"]
 
 
 class GuardError(Exception):
