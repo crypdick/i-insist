@@ -17,6 +17,10 @@ i-insist install claude
 Install only the integrations you use. Restart the agent and check hook trust
 with `/hooks`.
 
+Installer locks live in a private per-user directory, outside your settings tree.
+See [hook registration](docs/reference.md#hook-registration) for locations and cleanup
+of lock files left by older versions.
+
 ## Rules
 
 Plugins supply their own checks. Rules live in `~/.i-insist/*.toml` for global
