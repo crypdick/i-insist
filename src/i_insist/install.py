@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shlex
@@ -32,6 +33,22 @@ def configuration_path(harness: str) -> Path:
         return (root / "hooks.json").expanduser().resolve()
     root = Path(os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home() / ".claude")))
     return (root / "settings.json").expanduser().resolve()
+
+
+def _configuration_lock_path(path: Path) -> Path:
+    # NOTE: docs/reference.md, Hook registration documents location and path identity.
+    root = Path(
+        os.environ.get("XDG_RUNTIME_DIR") or os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache"
+    ).expanduser()
+    if not root.is_absolute():
+        raise GuardError(f"lock directory must be absolute: {root}")
+    directory = root / "i-insist" / "locks"
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    info = directory.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
+        raise GuardError(f"lock directory must be an owned, private directory (0700): {directory}")
+    key = hashlib.sha256(os.fsencode(path)).hexdigest()
+    return directory / f"{key}.lock"
 
 
 def owned(handler: object, harness: str, event: str) -> bool:
@@ -114,8 +131,8 @@ def configure(harness: str, *, install: bool) -> Path:
     if not install and not path.exists():
         return path
     path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path = path.with_name(f".{path.name}.i-insist.lock")
-    with os.fdopen(os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600), "a") as lock:
+    lock_path = _configuration_lock_path(path)
+    with os.fdopen(os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600), "a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         try:
             original = path.read_text() if path.exists() else None

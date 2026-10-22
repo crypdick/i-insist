@@ -17,7 +17,19 @@ Only a denied or flagged tool call sends a checker message to the agent.
 
 It preserves other settings, hooks, file permissions, and symlinks. Repeated runs
 don't create duplicate registrations. Writes are atomic, and concurrent installers
-coordinate through a lock file beside the configuration.
+coordinate through persistent lock files under `$XDG_RUNTIME_DIR/i-insist/locks`.
+When `XDG_RUNTIME_DIR` is unset or empty (including typical macOS sessions), the
+directory is `$XDG_CACHE_HOME/i-insist/locks`, defaulting to `~/.cache/i-insist/locks`.
+The selected base path must be absolute. The lock directory must belong to the
+current user with mode `0700`; symlink lock directories are rejected.
+Each lock filename is the SHA-256 hash of the resolved configuration path, followed
+by `.lock`. Symlink aliases share a lock; unrelated configuration files use separate
+locks. uv-owned installer locks stay in uv's tools directory.
+
+Upgrade all installers before using the centralized locks: older versions use
+adjacent lock files and do not coordinate with this location. Once older installers
+have stopped, their empty `.<filename>.i-insist.lock` files can be removed manually.
+Do not remove centralized lock files while installers may be running.
 
 ## Add a rule
 
