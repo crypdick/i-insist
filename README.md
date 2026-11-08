@@ -49,6 +49,8 @@ I insist, update both protected files.
 When a rule blocks a tool call, or a post rule flags one after it ran, its message names the rule, shows the triggering
 command or paths, and includes the checker's reason. For overridable rules, it
 also tells the agent to ask you to say `I insist`.
+Command previews show at most the first 500 characters, followed by
+`… [truncated]` when shortened. Checkers still receive the full command.
 
 Approval lasts for the current response and resets with your next message or
 when you start or resume a session. Quoted text and code blocks count too.
