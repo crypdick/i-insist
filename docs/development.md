@@ -18,6 +18,9 @@ uv build
 `uv run prek run --all-files` runs the full quality gates, including type and
 static checks. To run hooks automatically, use `uv run prek install`.
 Beartype also checks package imports at runtime.
+Local Python quality hooks use the tools pinned in `uv.lock`, so direct commands
+and hook execution share versions. The isolated pyproject validator separately
+pins its schema-store snapshot in `prek.toml`.
 
 Tests exercise installed hook commands and actual checker subprocesses using
 temporary homes, projects, and approval caches. They don't enable hooks in your
@@ -34,13 +37,18 @@ uv tool install --reinstall .
 `.github/workflows/publish.yml` runs tests, lint, formatting, and a package build
 on pull requests. Each successful push to `main` publishes a release to PyPI
 and creates a GitHub release with the wheel and source distribution attached.
-Manual workflow dispatch retries a release without needing another commit.
+Manual workflow dispatch at a release commit retries that release without needing
+another commit. Rerunning the original workflow also reuses that release while
+its commit remains at `main`'s HEAD. Runs overtaken by later commits are skipped.
 
 The workflow preserves an unpublished version from `pyproject.toml`. Otherwise,
 it increments the latest stable PyPI patch version. Use `uv version --bump minor`
 or `uv version --bump major` for an intentional version change. The release
 commit updates `pyproject.toml` and `uv.lock` together. The workflow skips
 superseded runs. Retries reuse their release commit and already uploaded files.
+Release commits are identified by their `Release major.minor.patch` subject and
+`Source-Commit` trailer matching their parent; dispatch at an ordinary source
+commit prepares a release instead.
 
 Publishing uses [PyPI Trusted Publishing](https://docs.pypi.org/trusted-publishers/)
 and the GitHub environment `pypi`, restricted to `main`. GitHub stores no PyPI

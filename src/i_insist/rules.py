@@ -10,11 +10,11 @@ import subprocess
 import time
 import tomllib
 from collections.abc import Iterator  # noqa: TC003 -- beartype resolves generator hints at import.
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 
-from i_insist.events import Event, GuardError, Phase
+from i_insist.events import Event, GuardError, Phase, absolute_path
 
 OVERRIDE_GUIDANCE = 'To override this check, ask the human to say "I insist".'
 # NOTE: README.md documents the command preview limit.
@@ -31,22 +31,21 @@ class Rule:
     phase: Phase
 
 
-def config_files(event: Event) -> list[Path]:
+def config_directories(event: Event) -> list[Path]:
     # NOTE: docs/reference.md documents additive ancestry, including explicit file targets.
     directories = [Path.home() / ".i-insist"]
     for location in (event.cwd, *(path.parent for path in event.paths)):
         directories.extend(parent / ".i-insist" for parent in reversed(location.parents))
         directories.append(location / ".i-insist")
+    return list(dict.fromkeys(absolute_path(str(directory), event.cwd) for directory in directories))
+
+
+def config_files(event: Event) -> list[Path]:
     files: list[Path] = []
-    seen: set[Path] = set()
-    for directory in directories:
-        resolved = directory.resolve()
-        if resolved in seen:
-            continue
-        seen.add(resolved)
+    for directory in config_directories(event):
         # iterdir reports permission errors instead of silently omitting policy.
         try:
-            children = list(resolved.iterdir())
+            children = list(directory.iterdir())
         except FileNotFoundError:
             continue
         files.extend(sorted(path for path in children if path.suffix == ".toml" and path.is_file()))
@@ -101,7 +100,7 @@ def uv_tool_lock(rule: Rule) -> Path | None:
     directories = [""] if "/" in command else os.get_exec_path()
     for directory in directories:
         executable = rule.directory / directory / command
-        environment = executable.resolve().parent.parent
+        environment = absolute_path(str(executable), rule.directory).parent.parent
         if (environment / "uv-receipt.toml").is_file():
             return environment.parent / ".lock"
         if os.access(executable, os.X_OK):
@@ -155,11 +154,13 @@ def run_checker(rule: Rule, event: Event) -> str | None:
                     timeout=max(0, deadline - time.monotonic()),
                 )
             except subprocess.TimeoutExpired:
-                if os.name == "posix":
-                    os.killpg(process.pid, signal.SIGKILL)
-                else:
-                    process.kill()
-                process.communicate()
+                with suppress(ProcessLookupError):
+                    if os.name == "posix":
+                        os.killpg(process.pid, signal.SIGKILL)
+                    else:
+                        process.kill()
+                # Popen closes our pipes and reaps the direct child on context exit.
+                # Draining here would wait for detached descendants holding pipes.
                 raise GuardError(f"checker {rule.id}: timed out after {rule.timeout:g}s") from None
             if process.returncode:
                 raise GuardError(f"checker {rule.id}: exited {process.returncode}: {stderr.strip()}")

@@ -52,5 +52,9 @@ def test_retry_reuses_release_and_overtaken_runs_are_skipped(tmp_path: Path, mon
     assert release_state(tmp_path, source) == "new"
     git("commit", "--allow-empty", "-m", "Release 0.2.0", "-m", f"Source-Commit: {source}")
     assert release_state(tmp_path, source) == "retry"
+    release = git("rev-parse", "HEAD")
+    assert release_state(tmp_path, release) == "retry"
     git("commit", "--allow-empty", "-m", "later change")
     assert release_state(tmp_path, source) == "stale"
+    assert release_state(tmp_path, release) == "stale"
+    assert release_state(tmp_path, git("rev-parse", "HEAD")) == "new"

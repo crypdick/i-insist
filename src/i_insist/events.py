@@ -28,7 +28,19 @@ def text_field(value: Json, name: str) -> str:
 
 
 def absolute_path(value: str, cwd: Path) -> Path:
-    return (cwd / Path(value).expanduser()).resolve()
+    path = requested_path(value, cwd)
+    try:
+        return path.resolve()
+    except (OSError, RuntimeError) as exc:
+        raise GuardError(f"cannot resolve path {str(path)!r}: {exc}") from exc
+
+
+def requested_path(value: str, cwd: Path) -> Path:
+    """Retain supplied path components, including symlinks and `..`."""
+    try:
+        return cwd / Path(value).expanduser()
+    except RuntimeError as exc:
+        raise GuardError(f"cannot expand path {value!r}: {exc}") from exc
 
 
 @dataclass(frozen=True)
@@ -67,6 +79,8 @@ class Event:
     tool_input: Json
     changes: tuple[FileChange, ...] = ()
     tool_use_id: str | None = None
+    requested_cwd: Path | None = None
+    requested_paths: tuple[Path, ...] = ()
 
     def as_json(self) -> dict[str, Json]:
         return {
@@ -79,6 +93,8 @@ class Event:
             "tool_input": self.tool_input,
             "changes": [change.as_json() for change in self.changes],
             "tool_use_id": self.tool_use_id,
+            "requested_cwd": str(self.requested_cwd or self.cwd),
+            "requested_paths": [str(path) for path in self.requested_paths],
         }
 
     @classmethod
@@ -88,6 +104,9 @@ class Event:
         if kind not in ("shell", "file_write", "file_edit", "other"):
             raise GuardError("input kind must be shell, file_write, file_edit, or other")
         cwd = absolute_path(text_field(data.get("cwd"), "cwd"), Path.cwd())
+        supplied_cwd = requested_path(
+            text_field(data.get("requested_cwd", data.get("cwd")), "requested_cwd"), Path.cwd()
+        )
         paths = data.get("paths", [])
         if not isinstance(paths, list):
             raise GuardError("input paths must be an array")
@@ -103,6 +122,11 @@ class Event:
         tool_use_id = data.get("tool_use_id")
         targets = [absolute_path(text_field(path, "path"), cwd) for path in paths]
         targets.extend(change.path for change in parsed_changes)
+        supplied_paths = data.get(
+            "requested_paths", paths + [object_input(change).get("path") for change in changes]
+        )
+        if not isinstance(supplied_paths, list):
+            raise GuardError("input requested_paths must be an array")
         return cls(
             cast("Kind", kind),
             command,
@@ -113,6 +137,13 @@ class Event:
             data.get("tool_input"),
             parsed_changes,
             None if tool_use_id is None else text_field(tool_use_id, "tool_use_id"),
+            supplied_cwd,
+            tuple(
+                dict.fromkeys(
+                    requested_path(text_field(path, "requested path"), supplied_cwd)
+                    for path in supplied_paths
+                )
+            ),
         )
 
 
@@ -126,13 +157,19 @@ def patch_changes(patch: str, cwd: Path) -> tuple[FileChange, ...]:
                 "*** Update File": "edit",
                 "*** Delete File": "delete",
             }[action]
-            changes.append(FileChange.from_json({"path": target, "operation": operation, "content": ""}, cwd))
+            changes.append(
+                FileChange(
+                    requested_path(text_field(target, "patch path"), cwd),
+                    cast('Literal["write", "edit", "delete"]', operation),
+                    "",
+                )
+            )
         elif line.startswith("*** Move to: "):
             if not changes or changes[-1].operation != "edit":
                 raise GuardError("input patch move needs an update target")
             source = changes[-1]
             changes[-1] = FileChange(source.path, "delete", "")
-            destination = absolute_path(text_field(line.removeprefix("*** Move to: "), "patch path"), cwd)
+            destination = requested_path(text_field(line.removeprefix("*** Move to: "), "patch path"), cwd)
             changes.append(FileChange(destination, "write", source.content))
         elif line.startswith("+") and changes:
             change = changes[-1]
@@ -158,7 +195,7 @@ def normalize_hook(data: dict[str, Json], harness: str) -> Event:
     name = text_field(data.get("tool_name"), "tool_name")
     native = data.get("tool_input", {})
     arguments = native if isinstance(native, dict) else {}
-    base = absolute_path(text_field(data.get("cwd", str(Path.cwd())), "cwd"), Path.cwd())
+    base = requested_path(text_field(data.get("cwd", str(Path.cwd())), "cwd"), Path.cwd())
     cwd = base
     kind: Kind = "other"
     command = None
@@ -170,12 +207,12 @@ def normalize_hook(data: dict[str, Json], harness: str) -> Event:
         if workdir is None:
             workdir = arguments.get("cwd")
         if workdir is not None:
-            cwd = absolute_path(text_field(workdir, "workdir"), base)
+            cwd = requested_path(text_field(workdir, "workdir"), base)
         command = text_field(arguments.get("command", arguments.get("cmd")), "command")
     elif name in {"Write", "write_file", "Edit", "MultiEdit", "NotebookEdit"}:
         kind = "file_write" if name in {"Write", "write_file"} else "file_edit"
         target = arguments.get("file_path", arguments.get("path", arguments.get("notebook_path")))
-        paths.append(absolute_path(text_field(target, "file_path"), cwd))
+        paths.append(requested_path(text_field(target, "file_path"), cwd))
         changes = (
             FileChange(paths[0], "write" if kind == "file_write" else "edit", file_content(arguments)),
         )
@@ -189,11 +226,16 @@ def normalize_hook(data: dict[str, Json], harness: str) -> Event:
     return Event(
         kind,
         command,
-        cwd,
-        tuple(dict.fromkeys(paths)),
+        absolute_path(str(cwd), Path.cwd()),
+        tuple(dict.fromkeys(absolute_path(str(path), cwd) for path in paths)),
         harness,
         name,
         native,
-        changes,
+        tuple(
+            FileChange(absolute_path(str(change.path), cwd), change.operation, change.content)
+            for change in changes
+        ),
         tool_use_id if isinstance(tool_use_id, str) and tool_use_id else None,
+        cwd,
+        tuple(dict.fromkeys(paths)),
     )

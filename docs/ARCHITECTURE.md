@@ -14,5 +14,8 @@ events. Approval remains human-owned, and configuration or checker failure block
 execution.
 
 The modules share event types from `events.py`; `cli.py` connects their behavior.
+Events retain requested lexical paths alongside physical paths. Discovery uses
+physical paths; configuration protection also uses lexical names and discovery's
+resolved configuration identities, so symlinks don't discard protected identity.
 While this remains one package, review these boundaries without a separate
 boundary checker.
