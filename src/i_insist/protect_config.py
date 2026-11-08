@@ -84,7 +84,7 @@ def python_config_reference(source: str) -> str:
                 "check_output",
             }:
                 return source
-    # NOTE: README.md documents this cooperative, literal-path check. Arbitrary
+    # NOTE: docs/reference.md documents this cooperative, literal-path check. Arbitrary
     # Python data flow and opaque programs still require an OS sandbox.
     return (
         ".i-insist"
@@ -137,7 +137,7 @@ def block_reason(event: Event) -> str | None:
 
 def strip_data_heredocs(command: str) -> str:
     """Drop quoted heredoc bodies that only feed data to a non-executing command."""
-    # NOTE: README.md documents which heredoc receivers keep their bodies checked.
+    # NOTE: docs/reference.md documents which heredoc receivers keep their bodies checked.
     lines = command.split("\n")
     result: list[str] = []
     index = 0

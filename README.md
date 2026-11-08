@@ -64,28 +64,10 @@ permissions.
 These are cooperative guards, not a sandbox. They depend on the agent calling
 hooks, and checkers run with your account's privileges.
 
-Configuration protection recognizes literal paths in Python `-c` commands and
-standalone quoted Python heredocs. Embedded replacement source text mentioning
-`.i-insist` is not itself a configuration path. Literal configuration paths
-(including f-string fragments) still require approval. Malformed Python,
-recognized dynamic execution calls, and other shell forms retain conservative
-checks. This is not arbitrary Python data-flow analysis or a shell sandbox.
-
-Separate shell commands are checked independently: listing `.i-insist` followed
-by an unrelated test or file operation does not require approval. Quoted and
-escaped separators stay within their command, as do redirection operators.
-A literal `cd` is followed: later commands count as inside `.i-insist` if any
-directory reached so far was. Computed `cd` targets, `pushd`, `popd`, variable
-assignments, shell control flow, groups, substitutions, and unquoted heredocs
-retain the conservative whole-call check, and denials say so. A quoted heredoc
-(`<<'EOF'`) body is data, so it's ignored when no command on its line can execute
-or apply input: shells, interpreters, `xargs`, `patch`, `git`, `awk`, `eval`,
-`source`, `sudo`, `env`, `exec`, and `ssh` keep their bodies checked. A path word names `.i-insist` only as
-a whole path component, so `.i-insist-notes` is a different directory. Words
-containing whitespace, quotes, globs, or `$` stay conservative.
-The denial message includes the matched word and command.
-Unknown `~user` names remain literal during path checks, so shell data such as
-Lua's `~=` operator does not cause a home-directory lookup error.
+Configuration changes require approval. The guard recognizes explicit paths and
+common shell mutations, but can't reliably detect writes hidden in scripts or
+computed paths. See [configuration protection](docs/reference.md#protecting-configuration)
+for parsing rules and conservative fallbacks.
 
 ## Update or uninstall
 

@@ -5,26 +5,19 @@ For contributors and release maintainers. See the [architecture](ARCHITECTURE.md
 
 ## Develop
 
-Beartype instruments package imports with runtime type checks. Development checks
-run through prek and uv. Install hooks once per checkout with
-`uv run prek install`.
-
-Create an isolated checkout. Replace `<name>` with your feature name:
-
-```sh
-new-feature <name> --no-agent && uv sync --locked --directory ".worktrees/<name>"
-```
-
-From the checkout, install dependencies and run the checks:
+Use `uv` with locked dependencies. Before committing, run:
 
 ```sh
 uv sync --locked
-uv run prek run --all-files
 uv run pytest
 uv run ruff check .
 uv run ruff format --check .
 uv build
 ```
+
+`uv run prek run --all-files` runs the full quality gates, including type and
+static checks. To run hooks automatically, use `uv run prek install`.
+Beartype also checks package imports at runtime.
 
 Tests exercise installed hook commands and actual checker subprocesses using
 temporary homes, projects, and approval caches. They don't enable hooks in your
