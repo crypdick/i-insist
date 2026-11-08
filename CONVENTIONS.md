@@ -1,29 +1,22 @@
 # Design conventions
 
-For advisory module naming and durable coding preferences, use the
-`coding-conventions` skill shipped with Strictify. Read only its relevant
-references; the project-specific decisions below remain canonical.
-
 ## Keep harness policy in adapters
 
 Normalize harness payloads into `i_insist.events.Event` at adapter boundaries.
 Checkers consume that neutral event. Runner and rule discovery must not depend on
-provider payload shapes.
+provider payload shapes or policy.
 
-## Parse, don't validate
+## Parse at boundaries
 
-Parse external JSON and TOML once into constrained values or frozen dataclasses.
-Reject malformed values before they reach core behavior. `NewType` adds static
-separation but doesn't validate data. Use it only when confusing two primitive
-domain values can cause a bug.
+Parse external JSON and TOML once; reject malformed values before core behavior.
+Use types that enforce meaningful domain constraints.
 
 ## Prefer composition
 
-Combine focused functions and values when behavior varies. Use inheritance only for
-genuine is-a relationships or framework contracts. Don't add interfaces or
-factories with only one implementation.
+Prefer focused functions and values over inheritance. Add abstractions when
+current behavior needs them, not for hypothetical implementations.
 
-## Couple duplicated documentation
+## Keep documentation aligned
 
-When prose repeats a code-owned value whose drift can mislead users, add a `NOTE:`
-at its code definition naming the document that must change with it.
+Keep documented behavior aligned with code. For easily missed dependencies, link
+the relevant document from the code definition.

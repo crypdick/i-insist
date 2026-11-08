@@ -13,6 +13,6 @@ Provider payload handling stays in adapters. Checkers receive only documented ne
 events. Approval remains human-owned, and configuration or checker failure blocks
 execution.
 
-The modules share event types from `events.py`, and `cli.py` connects their
-behavior. Add package-boundary enforcement when a second owned package or stable
-external Python API creates a boundary to check.
+The modules share event types from `events.py`; `cli.py` connects their behavior.
+While this remains one package, review these boundaries without a separate
+boundary checker.

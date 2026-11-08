@@ -100,15 +100,10 @@ The runner shows that string unchanged as the denial message. Any other JSON
 value, an empty or whitespace-only string, or extra output is a protocol error.
 Write debugging output to stderr.
 
-Treat tool arguments according to the tool's schema, not their spelling. An
-absolute-looking string is not necessarily a filesystem path: collaboration tools
-such as `collaboration.send_message` use `target: "/root"` for an agent address.
-A checker that tried Git repository ownership lookup on that address blocked
-messages with `fatal: cannot change to '/root': Permission denied`.
-Use neutral `cwd` and `paths` for filesystem checks; when inspecting `tool_input`
-for additional paths, distinguish path fields from agent addresses and other
-identifiers. Excluding an address from path lookup must not skip other policy
-checks on the event.
+Use neutral `cwd` and `paths` for filesystem checks. Interpret additional
+`tool_input` fields by their tool schema: an absolute-looking value can be an
+agent address (such as `collaboration.send_message`'s `target: "/root"`), not a path.
+Excluding an address from path lookup must not bypass other policy checks.
 
 Let policy evaluation errors fail the checker. Don't catch an error and return
 `null`: that falsely reports permission to proceed. Checkers run as subprocesses.
@@ -229,14 +224,31 @@ directories. Registration changes require human approval. The same rule ships in
 Repeated installation regenerates this provider-owned registration.
 
 The shell check recognizes common file commands, redirections, in-place `sed`,
-and interpreter commands naming `.i-insist`. For simple shell lists and pipelines,
-each command is checked separately, so a config read does not make an unrelated
-test invocation require approval. Quoting, escaping, and redirection operators
-are preserved. Directory changes, variable assignments, shell control flow,
-nested substitutions, and unnormalized heredocs keep the conservative whole-call
-check. Opaque scripts, dynamically
-constructed paths, and commands that change directories internally can evade
-it. This remains a cooperative guard, not a filesystem sandbox.
+and interpreter commands naming `.i-insist`. Opaque scripts and dynamically
+constructed paths can evade it; this is a cooperative guard, not a sandbox.
+
+Configuration protection recognizes literal paths in Python `-c` commands and
+standalone quoted Python heredocs. Embedded replacement source text mentioning
+`.i-insist` is not itself a configuration path. Literal configuration paths
+(including f-string fragments) still require approval. Malformed Python,
+recognized dynamic execution calls, and other shell forms retain conservative
+checks. This is not arbitrary Python data-flow analysis or a shell sandbox.
+
+Separate shell commands are checked independently: listing `.i-insist` followed
+by an unrelated test or file operation does not require approval. Quoted and
+escaped separators stay within their command, as do redirection operators.
+A literal `cd` is followed: later commands count as inside `.i-insist` if any
+directory reached so far was. Computed `cd` targets, `pushd`, `popd`, variable
+assignments, shell control flow, groups, substitutions, and unquoted heredocs
+retain the conservative whole-call check, and denials say so. A quoted heredoc
+(`<<'EOF'`) body is data, so it's ignored when no command on its line can execute
+or apply input: shells, interpreters, `xargs`, `patch`, `git`, `awk`, `eval`,
+`source`, `sudo`, `env`, `exec`, and `ssh` keep their bodies checked. A path word names `.i-insist` only as
+a whole path component, so `.i-insist-notes` is a different directory. Words
+containing whitespace, quotes, globs, or `$` stay conservative.
+The denial message includes the matched word and command.
+Unknown `~user` names remain literal during path checks, so shell data such as
+Lua's `~=` operator does not cause a home-directory lookup error.
 
 ## Provider dependency setup
 

@@ -1,16 +1,10 @@
 # Quality policy
 
-The production package must meet these requirements:
+The production package must pass strict mypy and configured Ruff checks, including
+complexity limits, and contain no known dead code.
 
-- Pass strict mypy and the configured Ruff checks.
-- Keep cyclomatic complexity at most 15, enforced by Ruff's `C901` rule.
-- Contain no known dead code.
-- Keep the branch coverage floor in `pyproject.toml` at least as high as the
-  recorded baseline. Raise it toward 100% as you
-  add meaningful cases. Don't add tautological tests to increase coverage.
+Preserve the established branch coverage floor in `pyproject.toml`. Improve
+coverage with meaningful behavior tests, not assertions added for a score.
 
-Tests must exercise public command-line and subprocess boundaries, including
-timeouts and parallel execution. Checks reject private implementation imports.
-
-Update this file when package boundaries, coverage floor, or test execution policy
-changes.
+Test behavior through public CLI and subprocess boundaries, including timeouts and
+parallel execution. Don't import private implementation details in tests.
