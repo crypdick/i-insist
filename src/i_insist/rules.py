@@ -17,6 +17,8 @@ from pathlib import Path
 from i_insist.events import Event, GuardError, Phase
 
 OVERRIDE_GUIDANCE = 'To override this check, ask the human to say "I insist".'
+# NOTE: README.md documents the command preview limit.
+COMMAND_PREVIEW_LIMIT = 500
 
 
 @dataclass(frozen=True)
@@ -174,7 +176,10 @@ def run_checker(rule: Rule, event: Event) -> str | None:
 
 def denial_message(rule: Rule, event: Event, reason: str) -> str:
     if event.command is not None:
-        trigger = f"command {json.dumps(event.command)}"
+        command = event.command
+        if len(command) > COMMAND_PREVIEW_LIMIT:
+            command = command[:COMMAND_PREVIEW_LIMIT] + "… [truncated]"
+        trigger = f"command {json.dumps(command)}"
     elif event.paths:
         trigger = f"paths {json.dumps([str(path) for path in event.paths])}"
     else:

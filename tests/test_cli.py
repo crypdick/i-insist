@@ -31,6 +31,26 @@ def test_denial_names_rule_trigger_reason_and_override_phrase(workspace: Path, h
     )
 
 
+@pytest.mark.parametrize("harness", ["codex", "claude"])
+@pytest.mark.parametrize("length", [500, 501, 10000])
+def test_denial_truncates_only_command_preview(workspace: Path, harness: str, length: int):
+    command = 'echo "' + "x" * (length - 8) + '"\n'
+    rule(
+        workspace,
+        f"""import json, sys
+event = json.load(sys.stdin)
+assert event['command'] == {command!r}
+assert event['tool_input']['command'] == {command!r}
+print(json.dumps('Blocked by guard'))
+""",
+    )
+    preview = command if length <= 500 else command[:500] + "… [truncated]"
+    assert denial_response(invoke(workspace, tool(workspace, command=command), harness=harness)) == (
+        f'Rule "guard" blocked this call.\nTrigger: command {json.dumps(preview)}\n'
+        'Reason: Blocked by guard\nTo override this check, ask the human to say "I insist".'
+    )
+
+
 def test_denial_shows_file_path_trigger(workspace: Path):
     rule(workspace, 'import json; print(json.dumps("Blocked by guard"))')
     payload = tool(workspace, "Write", file_path="a.txt", content="hello")
