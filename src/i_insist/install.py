@@ -10,11 +10,12 @@ import shutil
 import stat
 import tempfile
 import tomllib
+from copy import deepcopy
 from importlib.resources import files
 from pathlib import Path
 from typing import cast
 
-from i_insist.events import GuardError, Json
+from i_insist.events import GuardError, Json, absolute_path
 
 EVENTS = {
     "PreToolUse": "pre-tool-use",
@@ -30,9 +31,9 @@ TOOL_HOOKS = {"PreToolUse", "PostToolUse", "PostToolUseFailure"}
 def configuration_path(harness: str) -> Path:
     if harness == "codex":
         root = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex")))
-        return (root / "hooks.json").expanduser().resolve()
+        return absolute_path(str(root / "hooks.json"), Path.cwd())
     root = Path(os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home() / ".claude")))
-    return (root / "settings.json").expanduser().resolve()
+    return absolute_path(str(root / "settings.json"), Path.cwd())
 
 
 def _configuration_lock_path(path: Path) -> Path:
@@ -139,12 +140,17 @@ def configure(harness: str, *, install: bool) -> Path:
             document = json.loads(original) if original is not None else {}
             if not isinstance(document, dict):
                 raise ValueError("root must be an object")  # noqa: TRY004
+            prospective = deepcopy(document)
+            changed = edit_hooks(prospective, harness, install=install)
+            for settings_path, settings in settings_documents(harness, path, document):
+                states = check_settings(settings, harness, settings_path, install=install)
+                if harness == "codex":
+                    check_indexed_state(document, prospective, path, states, install=install)
             if install:
-                check_enabled(document, harness, path)
                 install_config_protection()
-            if not edit_hooks(document, harness, install=install):
+            if not changed:
                 return path
-            updated = json.dumps(document, indent=2) + "\n"
+            updated = json.dumps(prospective, indent=2) + "\n"
             if updated == original:
                 return path
             mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o600
@@ -179,7 +185,7 @@ def install_config_protection() -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     # NOTE: docs/reference.md's Protecting configuration describes provider-owned replacement.
     source = files("i_insist").joinpath("config-protection.toml").read_text()
-    destination = destination.resolve()
+    destination = absolute_path(str(destination), Path.cwd())
     temporary = None
     try:
         with tempfile.NamedTemporaryFile(mode="w", dir=destination.parent, delete=False) as stream:
@@ -191,73 +197,101 @@ def install_config_protection() -> None:
             temporary.unlink(missing_ok=True)
 
 
-def check_enabled(document: dict[str, Json], harness: str, path: Path) -> None:
-    """Reject explicit disables; trust decisions remain owned by the harness."""
-    check_project_settings(harness)
-    if harness == "claude":
-        if document.get("disableAllHooks") is True or document.get("allowManagedHooksOnly") is True:
-            raise GuardError("Claude hooks are disabled or managed-only; review /hooks and settings")
-        return
-    root = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))).expanduser()
-    config_path = root / "config.toml"
-    config = tomllib.loads(config_path.read_text()) if config_path.exists() else {}
-    features = config.get("features", {})
-    if features.get("hooks", features.get("codex_hooks", True)) is False:
-        raise GuardError("Codex hooks are disabled in config.toml; enable hooks before migration")
-    hooks = config.get("hooks", {})
-    if hooks.get("allow_managed_hooks_only") is True:
-        raise GuardError("Codex unmanaged hooks are disabled")
-    states = hooks.get("state", {})
-    registered = document.get("hooks", {})
-    if not isinstance(registered, dict):
-        raise GuardError("hooks must be an object")
-    for event, groups in registered.items():
-        if event not in EVENTS or not isinstance(groups, list):
-            continue
-        snake = {
-            "PreToolUse": "pre_tool_use",
-            "PostToolUse": "post_tool_use",
-            "SessionStart": "session_start",
-            "UserPromptSubmit": "user_prompt_submit",
-        }[event]
-        for group_index, group in enumerate(groups):
-            if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
-                continue
-            group_hooks = cast("list[Json]", group["hooks"])
-            for handler_index, handler in enumerate(group_hooks):
-                if not owned(handler, harness, EVENTS[event]):
-                    continue
-                keys = [
-                    f"{source}:{snake}:{group_index}:{handler_index}"
-                    for source in {path, root / "hooks.json"}
-                ]
-                if any(states.get(key, {}).get("enabled") is False for key in keys):
-                    raise GuardError("An i-insist hook is disabled in Codex; enable it with /hooks")
+def mapping_field(document: dict[str, Json], name: str) -> dict[str, Json]:
+    value = document.get(name, {})
+    if not isinstance(value, dict):
+        raise GuardError(f"{name} must be an object")
+    return value
 
 
-def check_project_settings(harness: str) -> None:
+def settings_documents(
+    harness: str, configuration: Path, document: dict[str, Json]
+) -> list[tuple[Path, dict[str, Json]]]:
     # NOTE: docs/reference.md describes this conservative check of current ancestry.
+    paths = [configuration]
+    if harness == "codex":
+        root = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))).expanduser()
+        paths = [root / "config.toml"]
     for parent in (*Path.cwd().parents, Path.cwd()):
         names = (
             (".codex/config.toml",)
             if harness == "codex"
             else (".claude/settings.json", ".claude/settings.local.json")
         )
-        for name in names:
-            path = parent / name
-            if not path.exists():
-                continue
+        paths.extend(parent / name for name in names)
+    result = []
+    for path in dict.fromkeys(absolute_path(str(path), Path.cwd()) for path in paths):
+        if path == configuration:
+            data = document
+        elif path.exists():
             data = tomllib.loads(path.read_text()) if harness == "codex" else json.loads(path.read_text())
-            if not isinstance(data, dict):
-                raise GuardError(f"configuration must be an object: {path}")
-            features = data.get("features", {})
-            disabled = (
-                features.get("hooks", features.get("codex_hooks", True)) is False
-                if harness == "codex"
-                else data.get("disableAllHooks") is True or data.get("allowManagedHooksOnly") is True
-            )
-            if disabled:
-                raise GuardError(f"Hooks are disabled by {path}; enable them before migration")
+        else:
+            continue
+        if not isinstance(data, dict):
+            raise GuardError(f"configuration must be an object: {path}")
+        result.append((path, data))
+    return result
+
+
+def check_settings(document: dict[str, Json], harness: str, path: Path, *, install: bool) -> dict[str, Json]:
+    if harness == "claude":
+        disabled = document.get("disableAllHooks") is True or document.get("allowManagedHooksOnly") is True
+        states: dict[str, Json] = {}
+    else:
+        features = mapping_field(document, "features")
+        hooks = mapping_field(document, "hooks")
+        states = mapping_field(hooks, "state")
+        for key in states:
+            mapping_field(states, key)
+        disabled = (
+            features.get("hooks", features.get("codex_hooks", True)) is False
+            or hooks.get("allow_managed_hooks_only") is True
+        )
+    if install and disabled:
+        raise GuardError(f"Hooks are disabled by {path}; enable them before migration")
+    return states
+
+
+def indexed_handlers(document: dict[str, Json]) -> dict[tuple[str, int, int], tuple[Json, Json]]:
+    result = {}
+    for event, groups in mapping_field(document, "hooks").items():
+        if event not in EVENTS:
+            continue
+        for group_index, group in enumerate(cast("list[dict[str, Json]]", groups)):
+            for handler_index, handler in enumerate(cast("list[Json]", group["hooks"])):
+                result[event, group_index, handler_index] = (group.get("matcher"), handler)
+    return result
+
+
+def check_indexed_state(
+    original: dict[str, Json],
+    prospective: dict[str, Json],
+    path: Path,
+    states: dict[str, Json],
+    *,
+    install: bool,
+) -> None:
+    before, after = indexed_handlers(original), indexed_handlers(prospective)
+    root = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))).expanduser()
+    for coordinate in before.keys() | after.keys():
+        event, group, handler = coordinate
+        snake = EVENTS[event].replace("-", "_")
+        entries = [
+            mapping_field(states, f"{source}:{snake}:{group}:{handler}")
+            for source in {path, root / "hooks.json"}
+            if f"{source}:{snake}:{group}:{handler}" in states
+        ]
+        if not entries:
+            continue
+        old, new = before.get(coordinate), after.get(coordinate)
+        if (
+            install
+            and any(entry.get("enabled") is False for entry in entries)
+            and any(value and owned(value[1], "codex", EVENTS[event]) for value in (old, new))
+        ):
+            raise GuardError("An i-insist hook is disabled in Codex; enable it with /hooks")
+        if old != new and not (new is None and old and owned(old[1], "codex", EVENTS[event])):
+            raise GuardError("Changing indexed hook state requires manual review with /hooks")
 
 
 def ensure() -> list[Path]:

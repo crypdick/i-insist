@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare the automatic release described in README.md's Publishing section."""
+"""Prepare the automatic release described in docs/development.md."""
 
 from __future__ import annotations
 
@@ -15,19 +15,18 @@ from pathlib import Path
 
 
 def release_state(root: Path, source: str) -> str:
-    """Reuse this push's release commit; skip CI overtaken by another push."""
-    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
-    if head == source:
-        return "new"
-    parent = subprocess.check_output(["git", "rev-parse", "HEAD^"], cwd=root, text=True).strip()
-    message = subprocess.check_output(["git", "log", "-1", "--format=%B"], cwd=root, text=True)
+    """Reuse a release from its source or release HEAD; skip overtaken runs."""
+    head, parent, message = subprocess.check_output(
+        ["git", "log", "-1", "--format=%H%n%P%n%B"], cwd=root, text=True
+    ).split("\n", 2)
     if (
-        parent == source
-        and message.startswith("Release ")
-        and f"Source-Commit: {source}" in message.splitlines()
+        source in (head, parent)
+        and re.fullmatch(r"[0-9a-f]{40}", parent)
+        and re.fullmatch(r"Release \d+\.\d+\.\d+", message.partition("\n")[0])
+        and f"Source-Commit: {parent}" in message.splitlines()
     ):
         return "retry"
-    return "stale"
+    return "new" if head == source else "stale"
 
 
 def release_version(current: str, published: list[str]) -> str:

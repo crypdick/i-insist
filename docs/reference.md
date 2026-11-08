@@ -26,6 +26,17 @@ Each lock filename is the SHA-256 hash of the resolved configuration path, follo
 by `.lock`. Symlink aliases share a lock; unrelated configuration files use separate
 locks. uv-owned installer locks stay in uv's tools directory.
 
+The installer validates the prospective hook document and consumed settings before
+writing either hooks or the shared protection registration. Invalid settings leave
+both files unchanged. Each write is atomic, but this is not a multi-file transaction:
+an I/O failure after the first replacement can still leave a partial installation.
+
+Codex keys per-hook state by group and handler indices. Installation and removal
+refuse a rewrite that would attach existing indexed state to a different matcher
+or handler, including unrelated hooks. Removing an owned handler into an unused
+slot is allowed. Review the layout and state with `/hooks` before retrying; the
+installer never silently moves or clears human trust and disable settings.
+
 Upgrade all installers before using the centralized locks: older versions use
 adjacent lock files and do not coordinate with this location. Once older installers
 have stopped, their empty `.<filename>.i-insist.lock` files can be removed manually.
@@ -69,6 +80,14 @@ rules too. A post checker failure is reported as feedback. Post rules run for bo
 successful and failed tool calls; Claude's failure event receives the message as
 additional context. To pair pre and post work for one call, key it by `tool_use_id`.
 
+Both phases stop at the first denial or checker error. Approval, earlier providers,
+or missing harness events can prevent a matching post invocation: pairing is
+best-effort, not a cleanup guarantee. Providers must expire saved snapshots.
+The event intentionally has no phase or tool-result field. Give paired checkers
+explicit arguments, such as `checker = ["my-checker", "snapshot"]` for a pre rule
+and `checker = ["my-checker", "verify"]` for its post rule, rather than inferring
+phase from cache presence. Never rely on a post rule to undo unsafe pre behavior.
+
 Store checkers anywhere. The optional `.i-insist/scripts/` directory is one
 convention. The runner executes the `checker` argument list without a shell.
 Use `sh` explicitly for a shell script. Relative script paths resolve from the
@@ -86,7 +105,7 @@ Rule discovery resolves and deduplicates directories. Each directory's TOML file
 run in filename order, with rules in declaration order. Discovery doesn't recursively
 scan `.i-insist/` subdirectories. Paths use their physical, symlink-resolved
 locations. Global and local rules accumulate. The first checker to return a denial supplies
-the block message, unchanged.
+the checker reason; the runner adds rule, trigger, and override context.
 
 Shell text is opaque to discovery: `cd`, `git -C`, shell write targets, and paths
 inside custom tool arguments aren't inferred. Put such policies at a scope the
@@ -96,7 +115,7 @@ invocation reaches, or resolve their targets in your provider's checker.
 
 Read one JSON object on stdin. Print exactly one JSON value on stdout and exit
 with status 0. Return `null` to allow the next check or a nonempty string to block.
-The runner shows that string unchanged as the denial message. Any other JSON
+The runner includes that string unchanged as the reason in its message. Any other JSON
 value, an empty or whitespace-only string, or extra output is a protocol error.
 Write debugging output to stderr.
 
@@ -111,6 +130,9 @@ The runner detects a nonzero exit and reports the exit status and complete stder
 including any exception traceback. Missing executables, invalid output, and
 timeouts also block with an error. On POSIX, timeout cleanup kills the checker process
 group, including its children unless they detach into another session.
+Timeout cleanup closes the runner's pipe readers and reaps its direct checker;
+it does not wait for detached descendants to close inherited stdout or stderr.
+Detached descendants can survive and require provider-owned cleanup.
 
 On Linux and macOS, the runner resolves checker executables from the rule directory
 or `PATH`, including entrypoint symlinks. An executable in an environment with
@@ -175,6 +197,15 @@ The fields have these meanings:
 | `tool_input` | Original tool arguments, unchanged, including unknown fields |
 | `changes` | File changes: absolute `path`, `operation` (`write`, `edit`, or `delete`), and text `content` |
 | `tool_use_id` | Harness identifier shared by one call's pre and post hooks, or `null` when the harness omits it |
+| `requested_cwd` | Absolute working directory before symlink resolution; defaults to the supplied `cwd` |
+| `requested_paths` | Absolute explicit targets before symlink resolution; defaults to supplied `paths` and change targets |
+
+`requested_cwd` and `requested_paths` retain lexical components, including `..`.
+Adapters emit them so a named protected path isn't lost when `cwd`, `paths`, and
+`changes` resolve symlinks. They do not add rule-discovery locations or replace
+physical filesystem identity. Custom callers should preserve them when forwarding
+normalized events; callers that already resolved and discarded the original names
+cannot recover that information. Unresolvable paths fail with a structured error.
 
 Adapters recognize shell calls and common direct editing tools, including
 `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, and `apply_patch`. Patch targets
@@ -223,6 +254,13 @@ directories. Registration changes require human approval. The same rule ships in
 [the configuration protection example](../examples/config-protection.toml).
 Repeated installation regenerates this provider-owned registration.
 
+Protection checks both requested `.i-insist` names and physical identities of
+applicable configuration directories and discovered registration files. A symlink
+such as `~/.i-insist -> /config-store` therefore doesn't remove protection, nor does
+a registration symlink pointing outside its directory. Physical targets outside
+applicable discovery remain unknown unless their requested path identifies the
+configuration location; the guard doesn't scan unrelated projects for aliases.
+
 The shell check recognizes common file commands, redirections, in-place `sed`,
 and interpreter commands naming `.i-insist`. Opaque scripts and dynamically
 constructed paths can evade it; this is a cooperative guard, not a sandbox.
@@ -233,6 +271,9 @@ standalone quoted Python heredocs. Embedded replacement source text mentioning
 (including f-string fragments) still require approval. Malformed Python,
 recognized dynamic execution calls, and other shell forms retain conservative
 checks. This is not arbitrary Python data-flow analysis or a shell sandbox.
+The supported scope is literal targets and common mutation forms, with conservative
+whole-call checks for opaque syntax. New language constructs are not implicitly
+supported; policy needing complete execution semantics belongs in an OS sandbox.
 
 Separate shell commands are checked independently: listing `.i-insist` followed
 by an unrelated test or file operation does not require approval. Quoted and
@@ -253,7 +294,7 @@ Lua's `~=` operator does not cause a home-directory lookup error.
 ## Provider dependency setup
 
 Providers can install a missing runner with `uv tool install` and then call
-`i-insist ensure`. It registers all three hooks for Codex and Claude Code installations
+`i-insist ensure`. It registers four hooks for Codex and five for Claude Code installations
 found on `PATH` or through existing user configuration. Explicitly disabled hooks
 cause a nonzero exit. It checks user settings, Codex per-hook disable state, and
 conservatively rejects disable flags in the current directory's ancestry.
@@ -283,6 +324,9 @@ calls in that response bypass overridable rules, including direct file edits and
 custom tools. A new user message replaces the approval with that message's decision.
 Starting or resuming a session clears approval. Compaction preserves it. Codex
 also requires the same `turn_id`, so approval doesn't transfer to another turn.
+Missing Codex turn IDs never grant cached approval: a prompt without one clears
+previous approval, and tool checks without one still run. Claude permits absent
+turn IDs. Explicit shell markers remain available in either integration.
 The agent remains responsible for respecting the scope you described.
 
 For a single shell tool invocation, the agent can use this explicit prefix only

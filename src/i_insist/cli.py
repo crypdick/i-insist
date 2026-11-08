@@ -52,13 +52,14 @@ def respond(message: str, event_name: str) -> None:
 
 def run_hook(data: dict[str, Json], harness: str, event_name: str) -> None:
     approvals, turn = context(data, harness, required=event_name not in TOOL_EVENTS)
+    cacheable = harness != "codex" or turn is not None
     if event_name == "user-prompt-submit":
         prompt = data.get("prompt")
         if not isinstance(prompt, str):
             raise GuardError("input prompt must be a string")
         if approvals is None:
             raise GuardError("approval context is required for prompts")
-        approvals.record(prompt_approves(prompt), turn)
+        approvals.record(prompt_approves(prompt) and cacheable, turn)
     elif event_name == "session-start":
         if approvals is None:
             raise GuardError("approval context is required for session start")
@@ -66,7 +67,7 @@ def run_hook(data: dict[str, Json], harness: str, event_name: str) -> None:
             approvals.reset()
     else:
         event = normalize_hook(data, harness)
-        approved = shell_approved(event) or bool(approvals and approvals.allows(turn))
+        approved = shell_approved(event) or bool(cacheable and approvals and approvals.allows(turn))
         if event_name != "pre-tool-use":
             reason = check(event, approved=approved, phase="post")
             if reason is not None:

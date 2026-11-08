@@ -11,6 +11,7 @@ from collections.abc import Sequence  # noqa: TC003  # Beartype resolves annotat
 from pathlib import Path
 
 from i_insist.events import Event  # noqa: TC001  # Beartype resolves annotation at runtime.
+from i_insist.rules import config_directories, config_files
 
 DENIAL_MESSAGE = (
     "Editing i-insist configuration requires human approval. Show the intended rule change "
@@ -61,7 +62,7 @@ QUOTED_DELIMITER = re.compile(r"-?(['\"])(\w+)\1")
 WHOLE_CALL_MARKERS = ("$(", "`", "<<", "<(", ">(")
 
 
-def python_config_reference(source: str) -> str:
+def python_config_reference(source: str, cwds: Sequence[Path], protected: Sequence[Path]) -> str:
     """Inspect literal paths without treating replacement source text as paths."""
     try:
         tree = ast.parse(source)
@@ -91,7 +92,7 @@ def python_config_reference(source: str) -> str:
         if any(
             isinstance(node, ast.Constant)
             and isinstance(node.value, str)
-            and ".i-insist" in Path(node.value).parts
+            and (".i-insist" in Path(node.value).parts or resolves_to_config(node.value, cwds, protected))
             for node in ast.walk(tree)
         )
         else ""
@@ -111,13 +112,16 @@ def normalize_python_heredocs(command: str) -> str:
 
 def block_reason(event: Event) -> str | None:
     """Name what matched, so a false positive can be rephrased instead of abandoned."""
-    for path in event.paths:
-        if ".i-insist" in path.parts:
+    # Discovery and protection share physical identities; requested paths retain
+    # lexical names even when the target's registration directory isn't discoverable.
+    protected = (*config_directories(event), *(path.resolve() for path in config_files(event)))
+    for path in (*event.paths, *event.requested_paths):
+        if is_config_path(path, protected):
             return f"path {str(path)!r}"
     if event.kind != "shell" or not event.command:
         return None
     # Every directory a literal `cd` may have reached stays suspect for later commands.
-    cwds = [event.cwd]
+    cwds = list(dict.fromkeys((event.requested_cwd or event.cwd, event.cwd)))
     command = strip_data_heredocs(normalize_python_heredocs(event.command))
     parts = shell_commands(command)
     whole = parts == [command] and re.search(r"[;\n&|]", command) is not None
@@ -125,7 +129,7 @@ def block_reason(event: Event) -> str | None:
         target = cd_target(part, cwds[-1])
         if target is not None:
             cwds.append(target)
-        if reason := shell_command_blocks(part, cwds):
+        if reason := shell_command_blocks(part, cwds, protected):
             if whole:
                 return (
                     f"{reason} (call checked as a whole because it uses heredocs, "
@@ -173,7 +177,7 @@ def strip_data_heredocs(command: str) -> str:
 
 
 def cd_target(command: str, cwd: Path) -> Path | None:
-    """Resolve a literal `cd`; computed targets keep the conservative word checks."""
+    """Retain a literal `cd` target; computed targets keep conservative word checks."""
     try:
         words = shlex.split(command, comments=True)
     except ValueError:
@@ -184,13 +188,13 @@ def cd_target(command: str, cwd: Path) -> Path | None:
     target = args[0] if args else "~"
     if len(args) > 1 or "$" in target:
         return None
-    return (cwd / os.path.expanduser(target)).resolve()  # noqa: PTH111 - Unknown users stay literal.
+    return cwd / os.path.expanduser(target)  # noqa: PTH111 - Unknown users stay literal.
 
 
 def shell_commands(command: str) -> list[str]:
     """Separate simple commands without splitting quoted or escaped separators."""
     # Shared shell state, nested execution, and heredocs retain the whole-call check.
-    if any(marker in command for marker in ("$(", "`", "<<", "<(", ">(")):
+    if any(marker in command for marker in WHOLE_CALL_MARKERS):
         return [command]
     try:
         words = shlex.split(command, comments=True)
@@ -225,18 +229,22 @@ def names_config(word: str) -> bool:
     return OPAQUE_WORD.search(word) is not None or ".i-insist" in Path(word).parts
 
 
-def resolves_to_config(word: str, cwds: Sequence[Path]) -> bool:
+def is_config_path(path: Path, protected: Sequence[Path]) -> bool:
+    return ".i-insist" in path.parts or any(path.is_relative_to(root) for root in protected)
+
+
+def resolves_to_config(word: str, cwds: Sequence[Path], protected: Sequence[Path]) -> bool:
     return (
         bool(word)
         and "\n" not in word
         and any(
-            ".i-insist" in (cwd / os.path.expanduser(word)).resolve().parts  # noqa: PTH111 - Unknown users stay literal.
+            is_config_path((cwd / os.path.expanduser(word)).resolve(), protected)  # noqa: PTH111 - Unknown users stay literal.
             for cwd in cwds
         )
     )
 
 
-def shell_command_blocks(command: str, cwds: Sequence[Path]) -> str | None:
+def shell_command_blocks(command: str, cwds: Sequence[Path], protected: Sequence[Path]) -> str | None:
     """Return why one simple command edits protected configuration, if it does."""
     # NOTE: Opaque programs can hide writes. This covers explicit paths and
     # common shell mutations; an OS sandbox is required for hostile agents.
@@ -248,11 +256,11 @@ def shell_command_blocks(command: str, cwds: Sequence[Path]) -> str | None:
         return "unparseable command mentioning '.i-insist'" if ".i-insist" in command else None
     for index in range(2, len(words)):
         if words[index - 1] == "-c" and re.fullmatch(PYTHON, words[index - 2]):
-            words[index] = python_config_reference(words[index])
+            words[index] = python_config_reference(words[index], cwds, protected)
     touched = (
-        next((f"working directory {str(cwd)!r}" for cwd in cwds if ".i-insist" in cwd.parts), None)
+        next((f"working directory {str(cwd)!r}" for cwd in cwds if is_config_path(cwd, protected)), None)
         or next((repr(word) for word in words if names_config(word)), None)
-        or next((repr(word) for word in words if resolves_to_config(word, cwds)), None)
+        or next((repr(word) for word in words if resolves_to_config(word, cwds, protected)), None)
     )
     if touched is None:
         return None
@@ -272,7 +280,9 @@ def shell_command_blocks(command: str, cwds: Sequence[Path]) -> str | None:
         (
             words[index + 1]
             for index, word in enumerate(words)
-            if ">" in word and index + 1 < len(words) and resolves_to_config(words[index + 1], cwds)
+            if ">" in word
+            and index + 1 < len(words)
+            and resolves_to_config(words[index + 1], cwds, protected)
         ),
         None,
     )

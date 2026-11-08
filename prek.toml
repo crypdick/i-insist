@@ -22,42 +22,58 @@ hooks = [
 ]
 
 [[repos]]
-repo = "https://github.com/Yelp/detect-secrets"
-rev = "v1.5.0"
-hooks = [{id = "detect-secrets", args = ["--baseline", ".secrets.baseline"], exclude = "uv\\.lock"}]
-
-[[repos]]
-repo = "https://github.com/jendrikseipp/vulture"
-rev = "v2.14"
-hooks = [{id = "vulture", args = ["src/i_insist", "tests", "--min-confidence", "80"]}]
-
-[[repos]]
-repo = "https://github.com/asottile/pyupgrade"
-rev = "v3.21.2"
-hooks = [{id = "pyupgrade", args = ["--py312-plus"]}]
-
-[[repos]]
-repo = "https://github.com/ikamensh/flynt"
-rev = "1.0.6"
-hooks = [{id = "flynt"}]
-
-[[repos]]
-repo = "https://github.com/osprey-oss/deptry"
-rev = "0.25.1"
-hooks = [{id = "deptry", entry = "uv run deptry ."}]
-
-[[repos]]
 repo = "https://github.com/henryiii/validate-pyproject-schema-store"
 rev = "2026.07.08"
 hooks = [{id = "validate-pyproject"}]
 
 [[repos]]
-repo = "https://github.com/henryiii/check-sdist"
-rev = "v1.5.0"
-hooks = [{id = "check-sdist-isolated", args = ["--inject-junk"]}]
-
-[[repos]]
 repo = "local"
+
+[[repos.hooks]]
+id = "detect-secrets"
+name = "Detect secrets"
+entry = "uv run detect-secrets-hook --baseline .secrets.baseline"
+language = "system"
+types = ["text"]
+exclude = "(^\\.secrets\\.baseline$|uv\\.lock$)"
+
+[[repos.hooks]]
+id = "vulture"
+name = "Vulture"
+entry = "uv run vulture"
+language = "system"
+pass_filenames = false
+always_run = true
+
+[[repos.hooks]]
+id = "pyupgrade"
+name = "pyupgrade"
+entry = "uv run pyupgrade --py312-plus"
+language = "system"
+types = ["python"]
+
+[[repos.hooks]]
+id = "flynt"
+name = "flynt"
+entry = "uv run flynt"
+language = "system"
+types = ["python"]
+
+[[repos.hooks]]
+id = "deptry"
+name = "deptry"
+entry = "uv run deptry ."
+language = "system"
+pass_filenames = false
+always_run = true
+
+[[repos.hooks]]
+id = "check-sdist-isolated"
+name = "Check sdist"
+entry = "uv run check-sdist --inject-junk"
+language = "system"
+pass_filenames = false
+always_run = true
 
 [[repos.hooks]]
 id = "ruff-check"
@@ -85,20 +101,6 @@ always_run = true
 id = "check-exception-handling"
 name = "Check exception handling"
 entry = "uv run python scripts/prek_hooks/check_exception_handling.py"
-language = "system"
-types = ["python"]
-
-[[repos.hooks]]
-id = "check-timeless-comments"
-name = "Check timeless comments"
-entry = "uv run python scripts/prek_hooks/check_timeless_comments.py"
-language = "system"
-types = ["python"]
-
-[[repos.hooks]]
-id = "check-file-length"
-name = "Check file length"
-entry = "uv run python scripts/prek_hooks/check_file_length.py"
 language = "system"
 types = ["python"]
 

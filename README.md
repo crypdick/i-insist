@@ -17,6 +17,10 @@ i-insist install claude
 Install only the integrations you use. Restart the agent and check hook trust
 with `/hooks`.
 
+Installation and removal refuse changes that would transfer Codex's indexed hook
+settings to a different command. Review the affected registrations with `/hooks`
+before retrying; the installer never rewrites human trust or disable settings.
+
 Installer locks live in a private per-user directory, outside your settings tree.
 See [hook registration](docs/reference.md#hook-registration) for locations and cleanup
 of lock files left by older versions.
@@ -28,7 +32,8 @@ use or `.i-insist/*.toml` within a project. Global and applicable local rules
 run together.
 
 Installation includes a rule requiring human approval to change `.i-insist`
-files. Other checks come from your plugins or scripts.
+files, including symlinked configuration directories and registrations. Other
+checks come from your plugins or scripts.
 
 To write your own, start with the [runnable example](examples/project) and
 [rule and checker reference](docs/reference.md#add-a-rule).
@@ -56,6 +61,8 @@ Approval lasts for the current response and resets with your next message or
 when you start or resume a session. Quoted text and code blocks count too.
 Teammate or subagent messages that arrive during the response don't reset it,
 because the harness doesn't report them as new prompts.
+Codex cached approval requires a nonempty matching `turn_id` on both prompt and
+tool events. Without it, checks still run normally; Claude doesn't require a turn ID.
 
 Rules marked `overridable = false` still run. Invalid configuration still blocks
 approved calls. Approval doesn't override other plugins or the agent's own
@@ -68,6 +75,10 @@ Configuration changes require approval. The guard recognizes explicit paths and
 common shell mutations, but can't reliably detect writes hidden in scripts or
 computed paths. See [configuration protection](docs/reference.md#protecting-configuration)
 for parsing rules and conservative fallbacks.
+
+Pre and post rules stop at the first denial or checker error. Post checks are
+feedback, not guaranteed cleanup callbacks; providers must expire saved state
+when a corresponding post check never runs.
 
 ## Update or uninstall
 
