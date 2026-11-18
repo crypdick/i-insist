@@ -249,8 +249,8 @@ See [the ownership decision](decisions/003-checker-owned-policy.md).
 ## Protecting configuration
 
 `i-insist install` installs `~/.i-insist/i-insist.toml`. Its checker blocks
-explicit file edits under `.i-insist` and common shell mutations that name those
-directories. Registration changes require human approval. The same rule ships in
+structured file edits under `.i-insist`, including `Write`, `Edit`, and
+`apply_patch` targets. Registration changes require human approval. The same rule ships in
 [the configuration protection example](../examples/config-protection.toml).
 Repeated installation regenerates this provider-owned registration.
 
@@ -261,35 +261,33 @@ a registration symlink pointing outside its directory. Physical targets outside
 applicable discovery remain unknown unless their requested path identifies the
 configuration location; the guard doesn't scan unrelated projects for aliases.
 
-The shell check recognizes common file commands, redirections, in-place `sed`,
-and interpreter commands naming `.i-insist`. Opaque scripts and dynamically
-constructed paths can evade it; this is a cooperative guard, not a sandbox.
+Shell checking has a deliberately small scope: one simple command with literal
+words, optionally followed by one output redirection (`>` or `>>`). Words may be
+unquoted or wholly single- or double-quoted; concatenated quoting is unsupported.
+The checker recognizes `rm`, `rmdir`, `mkdir`, `touch`, `tee`, `mv`, `cp`, `install`,
+and `ln`, including absolute executable paths. It checks destination only for
+`cp`, `install`, and `ln`, so copying configuration to a backup is allowed. Other
+recognized mutators check all operands. Literal targets retain both lexical and
+physical configuration identities, including the operation's working directory.
 
-Configuration protection recognizes literal paths in Python `-c` commands and
-standalone quoted Python heredocs. Embedded replacement source text mentioning
-`.i-insist` is not itself a configuration path. Literal configuration paths
-(including f-string fragments) still require approval. Malformed Python,
-recognized dynamic execution calls, and other shell forms retain conservative
-checks. This is not arbitrary Python data-flow analysis or a shell sandbox.
-The supported scope is literal targets and common mutation forms, with conservative
-whole-call checks for opaque syntax. New language constructs are not implicitly
-supported; policy needing complete execution semantics belongs in an OS sandbox.
+Options are unsupported except `--` and these `rm` options: `-r`, `-R`, `-f`,
+`-rf`, `-fr`, `-Rf`, `-fR`, `--recursive`, and `--force`. Unsupported options leave
+command operands unchecked; a supported trailing redirection is still checked.
+For example, `rm -rf ~/.i-insist` and `echo x > ~/.i-insist/policy.toml` require
+approval, while `cp ~/.i-insist/policy.toml /tmp/backup` does not.
 
-Separate shell commands are checked independently: listing `.i-insist` followed
-by an unrelated test or file operation does not require approval. Quoted and
-escaped separators stay within their command, as do redirection operators.
-A literal `cd` is followed: later commands count as inside `.i-insist` if any
-directory reached so far was. Computed `cd` targets, `pushd`, `popd`, variable
-assignments, shell control flow, groups, substitutions, and unquoted heredocs
-retain the conservative whole-call check, and denials say so. A quoted heredoc
-(`<<'EOF'`) body is data, so it's ignored when no command on its line can execute
-or apply input: shells, interpreters, `xargs`, `patch`, `git`, `awk`, `eval`,
-`source`, `sudo`, `env`, `exec`, and `ssh` keep their bodies checked. A path word names `.i-insist` only as
-a whole path component, so `.i-insist-notes` is a different directory. Words
-containing whitespace, quotes, globs, or `$` stay conservative.
-The denial message includes the matched word and command.
-Unknown `~user` names remain literal during path checks, so shell data such as
-Lua's `~=` operator does not cause a home-directory lookup error.
+There is no conservative whole-command fallback. Commands containing newlines,
+carriage returns, NULs, `;`, `$`, backticks, backslashes, `&`, `|`, `<`, parentheses,
+braces, glob characters (`*`, `?`, `[` or `]`), or `#` are left unchecked, even if
+those characters appear inside quotes. This excludes heredocs, substitutions,
+loops, pipelines, and compound commands. Malformed quoting is also left unchecked.
+Wrappers such as `sudo`, interpreter source, and `cd` are not interpreted.
+
+These limits deliberately miss indirect writes rather than blocking ordinary
+development and note writing. Structured event paths remain protected even when
+shell source is unsupported. This is a cooperative guard, not a shell security
+boundary; use an OS sandbox for protection against arbitrary programs. External
+checker policies and human approval scope are unchanged.
 
 ## Provider dependency setup
 

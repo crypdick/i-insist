@@ -71,10 +71,11 @@ permissions.
 These are cooperative guards, not a sandbox. They depend on the agent calling
 hooks, and checkers run with your account's privileges.
 
-Configuration changes require approval. The guard recognizes explicit paths and
-common shell mutations, but can't reliably detect writes hidden in scripts or
-computed paths. See [configuration protection](docs/reference.md#protecting-configuration)
-for parsing rules and conservative fallbacks.
+Configuration edits through structured file tools require approval. The built-in
+guard checks their explicit paths, including symlink aliases. It also catches
+simple literal shell writes. Unsupported shell syntax is left unchecked, not
+blocked conservatively. See
+[configuration protection](docs/reference.md#protecting-configuration) for scope.
 
 Pre and post rules stop at the first denial or checker error. Post checks are
 feedback, not guaranteed cleanup callbacks; providers must expire saved state
