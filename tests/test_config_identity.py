@@ -55,8 +55,8 @@ def test_lexical_config_target_outside_discovery_ancestry_still_protected(worksp
     assert "human approval" in denial(invoke(workspace, tool(workspace, name, **arguments)))
 
 
-@pytest.mark.parametrize("operation", ["redirect", "mutator", "cwd", "python"])
-def test_shell_protects_physical_config_identity(workspace, operation):
+@pytest.mark.parametrize("operation", ["redirect", "mutator", "cwd"])
+def test_literal_shell_write_preserves_config_identity(workspace, operation):
     assert manage_hooks("install", "codex", workspace).returncode == 0
     named = workspace.parent / ".i-insist"
     store = workspace / "store"
@@ -66,16 +66,15 @@ def test_shell_protects_physical_config_identity(workspace, operation):
         "redirect": f"printf ok > {store}/provider.toml",
         "mutator": f"rm {store}/provider.toml",
         "cwd": "rm provider.toml",
-        "python": f"python3 -c 'from pathlib import Path; Path(\"{store}/provider.toml\").unlink()'",
     }[operation]
     payload = tool(workspace, command=command)
     if operation == "cwd":
         payload["tool_input"]["workdir"] = str(named)
     assert "human approval" in denial(invoke(workspace, payload))
-    allowed(invoke(workspace, tool(workspace, command=f"cat {store}/provider.toml")))
 
 
-def test_normalized_config_event_retains_requested_target(workspace):
+@pytest.mark.parametrize("kind", ["file_write", "shell"])
+def test_normalized_config_event_retains_requested_target(workspace, kind):
     assert manage_hooks("install", "codex", workspace).returncode == 0
     project = workspace / "project"
     project.mkdir()
@@ -86,7 +85,8 @@ def test_normalized_config_event_retains_requested_target(workspace):
         [sys.executable, "-m", "i_insist", "check"],
         input=json.dumps(
             {
-                "kind": "file_write",
+                "kind": kind,
+                "command": "true" if kind == "shell" else None,
                 "cwd": str(workspace),
                 "paths": [str(store / "provider.toml")],
                 "requested_paths": [str(project / ".i-insist/provider.toml")],
@@ -101,14 +101,3 @@ def test_normalized_config_event_retains_requested_target(workspace):
     )
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["blocked"] is True
-
-
-def test_shell_cd_retains_lexical_config_identity_outside_discovery(workspace):
-    assert manage_hooks("install", "codex", workspace).returncode == 0
-    project = workspace / "project"
-    project.mkdir()
-    store = workspace / "store"
-    store.mkdir()
-    (project / ".i-insist").symlink_to(store, target_is_directory=True)
-    payload = tool(workspace, command="cd project/.i-insist; rm provider.toml")
-    assert "human approval" in denial(invoke(workspace, payload))

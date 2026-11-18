@@ -1,4 +1,4 @@
-"""Exercise shell command boundaries through the public config checker."""
+"""Only bounded literal shell writes participate in configuration protection."""
 
 import json
 import subprocess
@@ -6,116 +6,85 @@ import sys
 
 import pytest
 
-
-@pytest.mark.parametrize("separator", ["\n", "; ", " && ", " || ", " | ", " & "])
-@pytest.mark.parametrize("write", [False, True])
-def test_config_shell_command_boundaries(workspace, separator, write):
-    command = separator.join(
-        [
-            "ls -l ~/.i-insist/sensitive-orgs.*",
-            "git status --short",
-            "python3 /tmp/test_guard.py",
-            "touch ~/.i-insist/policy.toml" if write else "touch /tmp/test-result",
-        ]
-    )
-    assert config_denied(workspace, command) is write
+from tests.support import allowed, denial, invoke, manage_hooks, tool
 
 
 @pytest.mark.parametrize(
-    ("command", "blocked"),
+    "command",
     [
-        ("cat <<'LUA'\nassert(left ~= right)\nLUA", False),
-        ("printf '%s' '~=lua'", False),
-        ("printf ok > '~=output'", False),
-        ("printf ok > '~=output'; rm ~/.i-insist/policy.toml", True),
-        ("python3 /tmp/test_guard.py\nls -l ~/.i-insist", False),
-        ("ls ~/.i-insist\npython3 - <<'PY'\nprint('ok')\nPY\n", False),
-        ("ls ~/.i-insist; python3 -c 'print(\"a;b\")'", False),
-        ("ls ~/.i-insist # python3 is next\npython3 /tmp/test_guard.py", False),
-        ("ls ~/.i-insist\n# unmatched quote ' in comment\npython3 /tmp/test_guard.py", False),
-        ("ls ~/.i-insist; printf ok > /tmp/result", False),
-        ("ls ~/.i-insist; sed -i s/a/b/ /tmp/result", False),
-        ("ls ~/.i-insist; rm /tmp/result", False),
-        ("printf ok > ~/.i-insist/policy.toml; python3 /tmp/test_guard.py", True),
-        ("printf ok >& ~/.i-insist/policy.toml", True),
-        ("printf ok >| ~/.i-insist/policy.toml", True),
-        ("printf ok &> ~/.i-insist/policy.toml", True),
-        ("printf ok &>> ~/.i-insist/policy.toml", True),
-        ("ls ~/.i-insist 2>&1; python3 /tmp/test_guard.py", False),
-        ("ls /tmp; sed -i s/a/b/ ~/.i-insist/policy.toml", True),
-        ("ls /tmp; rm ~/.i-insist/policy.toml", True),
-        ("ls /tmp; python3 -c 'from pathlib import Path; Path(\".i-insist/policy.toml\").unlink()'", True),
-        ("python3 -c 'print(\";\")' ~/.i-insist/policy.toml", True),
-        ("python3 -c \"print(';')\" ~/.i-insist/policy.toml", True),
-        ("python3 /tmp/runner.py \\\n ~/.i-insist/policy.toml", True),
-        ("python3 /tmp/runner.py foo\\;bar ~/.i-insist/policy.toml", True),
-        ("python3 $(printf 'script.py;') ~/.i-insist/policy.toml", True),
-        ("python3 `printf 'script.py;'` ~/.i-insist/policy.toml", True),
-        ("cat <<EOF\nhello\nEOF\nrm ~/.i-insist/policy.toml", True),
-        ("python3 'unclosed ~/.i-insist/policy.toml", True),
-        ("cd ~/.i-insist; rm policy.toml", True),
-        ("pushd ~/.i-insist; rm policy.toml", True),
-        ('target=~/.i-insist/policy.toml; rm "$target"', True),
-        ('for target in ~/.i-insist/*; do rm "$target"; done', True),
-        ('remove() { rm "$1"; }; remove ~/.i-insist/policy.toml', True),
-        ("(cd ~/.i-insist; rm policy.toml)", True),
-        ("cd ~; i-insist --version; python3 -c 'print(1)'; ls .i-insist", False),
-        ("cd /tmp; ls ~/.i-insist; python3 /tmp/test_guard.py", False),
-        ("cd /tmp\nls ~/.i-insist\npython3 /tmp/test_guard.py", False),
-        ("touch ~/.i-insist-notes/policy.toml", False),
-        ("cd /tmp; cd ~/.i-insist; rm policy.toml", True),
-        ("cd ~/.i-insist || cd /tmp; rm policy.toml", True),
-        ("cd ~/.i-insist && python3 /tmp/test_guard.py", True),
-        ("cd ../.i-insist; rm policy.toml", True),
-        ("cd ~/.i-insist\nrm policy.toml", True),
+        "uv tool install example; echo $(date); ls ~/.i-insist",
+        "for path in ~/.i-insist/*; do printf '%s\\n' \"$path\"; done; touch /tmp/result",
+        "python3 - <<'PY'\nprint('~/.i-insist/policy.toml')\nPY",
+        "python3 -c \"print('\\\\x00', '~/.i-insist/policy.toml')\"",
     ],
 )
-def test_config_shell_quoting_and_writes(workspace, command, blocked):
-    assert config_denied(workspace, command) is blocked
+def test_opaque_shell_does_not_require_config_approval(workspace, command):
+    assert config_result(workspace, command) is None
 
 
 @pytest.mark.parametrize(
-    ("command", "blocked"),
+    "command",
     [
-        ("obsidian-knowledge write note.md <<'END'\nIt's about ~/.i-insist/policy.toml\nEND", False),
-        ('cat > /tmp/note.md <<"EOF"\nrm ~/.i-insist/policy.toml\nEOF', False),
-        ("cat <<-'EOF' > /tmp/note.md\n\trm ~/.i-insist/policy.toml\n\tEOF", False),
-        ("cat > ~/.i-insist/policy.toml <<'EOF'\n[[rules]]\nEOF", True),
-        ("tee ~/.i-insist/policy.toml <<'EOF'\n[[rules]]\nEOF", True),
-        ("cat <<'EOF'\nhello\nEOF\nrm ~/.i-insist/policy.toml", True),
-        ("bash <<'EOF'\nrm ~/.i-insist/policy.toml\nEOF", True),
-        ("sudo sh <<'EOF'\nrm ~/.i-insist/policy.toml\nEOF", True),
-        ("xargs rm <<'EOF'\n~/.i-insist/policy.toml\nEOF", True),
-        ("cat <<EOF\n$(rm ~/.i-insist/policy.toml)\nEOF", True),
-        ("echo \"<<'X'\"\nrm ~/.i-insist/policy.toml\nX", True),
-        ("cat <<'EOF'\nunterminated\nrm ~/.i-insist/policy.toml", True),
+        "cd ~/.i-insist; rm policy.toml",
+        "python3 -c 'from pathlib import Path; Path(\".i-insist/policy.toml\").unlink()'",
+        "bash <<'EOF'\nrm ~/.i-insist/policy.toml\nEOF",
+        "python3 'unclosed ~/.i-insist/policy.toml",
     ],
 )
-def test_quoted_heredoc_data_is_not_a_command(workspace, command, blocked):
-    assert config_denied(workspace, command) is blocked
+def test_opaque_shell_writes_are_outside_builtin_protection(workspace, command):
+    assert config_result(workspace, command) is None
 
 
-def test_whole_call_denial_says_it_was_checked_as_a_whole(workspace):
-    message = config_result(workspace, "uv tool install x\necho $(date)\nmkdir ~/.i-insist")
-    assert "checked as a whole" in message
+@pytest.mark.parametrize(
+    "command",
+    [
+        "rm -rf ~/.i-insist",
+        "/bin/rm -- ~/.i-insist/policy.toml",
+        "touch '.i-insist/policy with spaces.toml'",
+        "mkdir .i-insist",
+        "rmdir .i-insist",
+        "tee .i-insist/policy.toml",
+        "cp /tmp/policy.toml .i-insist/policy.toml",
+        "mv .i-insist/policy.toml /tmp/backup",
+        "install /tmp/policy.toml .i-insist/policy.toml",
+        "ln /tmp/policy.toml .i-insist/policy.toml",
+        "printf ok > ~/.i-insist/policy.toml",
+        "echo ok >> '.i-insist/policy with spaces.toml'",
+    ],
+)
+def test_literal_shell_writes_require_approval(workspace, command):
+    message = config_result(workspace, command)
+    assert "human approval" in message
+    assert "Matched" in message
 
 
-@pytest.mark.parametrize("command", ["printf ok > '~=alias/policy.toml'", "touch '~=alias/policy.toml'"])
-def test_literal_tilde_alias_to_config_still_blocks(workspace, command):
-    protected = workspace / ".i-insist"
-    protected.mkdir()
-    (workspace / "~=alias").symlink_to(protected, target_is_directory=True)
-    assert config_denied(workspace, command)
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cp ~/.i-insist/policy.toml /tmp/backup",
+        "ln ~/.i-insist/policy.toml /tmp/backup",
+        "touch -r ~/.i-insist/policy.toml /tmp/result",
+        "echo '>' ~/.i-insist/policy.toml",
+        "echo 'rm ~/.i-insist/policy.toml'",
+        "rm '.i-insist'notes/policy.toml",
+        "echo ok > '.i-insist'notes/policy.toml",
+        "sudo rm ~/.i-insist/policy.toml",
+        "rm ~/.i-insist/policy.toml; true",
+        "rm ~/.i-insist/*.toml",
+        'echo ok > "$HOME/.i-insist/policy.toml"',
+        "touch .i-insist-notes/policy.toml",
+    ],
+)
+def test_reads_and_unsupported_shell_are_not_denied(workspace, command):
+    assert config_result(workspace, command) is None
 
 
-def test_denial_names_the_matched_word_and_mutator(workspace):
-    message = config_result(workspace, "ls /tmp; rm ~/.i-insist/policy.toml")
-    assert "~/.i-insist/policy.toml" in message
-    assert "rm" in message
-
-
-def config_denied(workspace, command):
-    return bool(config_result(workspace, command))
+@pytest.mark.parametrize("harness", ["codex", "claude"])
+def test_installed_config_rule_distinguishes_literal_and_opaque_shell(workspace, harness):
+    assert manage_hooks("install", harness, workspace).returncode == 0
+    payload = tool(workspace, command="rm ~/.i-insist/policy.toml")
+    assert "human approval" in denial(invoke(workspace, payload, harness=harness))
+    allowed(invoke(workspace, tool(workspace, command="sudo rm ~/.i-insist/policy.toml"), harness=harness))
 
 
 def config_result(workspace, command):
